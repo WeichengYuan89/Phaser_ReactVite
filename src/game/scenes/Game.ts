@@ -1,8 +1,10 @@
 import { Scene } from 'phaser';
 
 import { EventBus } from '../EventBus';
+import { DifficultyClass, VoiceClip, VoiceGender, VOICE_CLIPS } from '../audioCatalog';
 
 type PlantId = 'lupinus' | 'mushroom';
+type DifficultyLevel = 1 | 2 | 3;
 
 interface PlantState
 {
@@ -20,7 +22,8 @@ interface ClusterState
     targetPlant: PlantId;
     drops: number;
     fallSpeed: number;
-    cueTimer: Phaser.Time.TimerEvent;
+    voiceClip: VoiceClip;
+    voiceSound: Phaser.Sound.BaseSound | null;
 }
 
 interface GameInitData
@@ -44,7 +47,9 @@ export class Game extends Scene
     private score: number;
     private secondsLeft: number;
     private roundOver: boolean;
-    private audioContext: AudioContext | null;
+    private difficultyLevel: DifficultyLevel;
+    private levelCorrectCount: number;
+    private level2WrongStreak: number;
 
     constructor ()
     {
@@ -55,7 +60,9 @@ export class Game extends Scene
         this.score = 0;
         this.secondsLeft = 120;
         this.roundOver = false;
-        this.audioContext = null;
+        this.difficultyLevel = 1;
+        this.levelCorrectCount = 0;
+        this.level2WrongStreak = 0;
     }
 
     create (data: GameInitData)
@@ -77,9 +84,9 @@ export class Game extends Scene
             color: '#f8fafc'
         }).setOrigin(1, 0);
 
-        this.hintText = this.add.text(width / 2, 140, 'Move with LEFT / RIGHT (or A / D) and match voice target.', {
+        this.hintText = this.add.text(width / 2, 140, 'Move with LEFT / RIGHT (or A / D)', {
             fontFamily: 'Arial',
-            fontSize: 24,
+            fontSize: 22,
             color: '#0f172a',
             backgroundColor: '#ffffffcc',
             padding: { x: 12, y: 6 }
@@ -97,13 +104,17 @@ export class Game extends Scene
         this.score = 0;
         this.secondsLeft = 120;
         this.roundOver = false;
+        this.difficultyLevel = 1;
+        this.levelCorrectCount = 0;
+        this.level2WrongStreak = 0;
+
         this.updateHud();
         this.updatePlantVisual('lupinus');
         this.updatePlantVisual('mushroom');
 
         if (data.mode === 'time-attack')
         {
-            this.hintText.setText('Time Attack: grow both plants to adult stage before time runs out.');
+            this.hintText.setText('Time Attack: route each raindrop to the correct plant.');
         }
 
         this.clusterSpawnTimer = this.time.addEvent({
@@ -174,6 +185,7 @@ export class Game extends Scene
         }
 
         const targetPlant = this.pickTargetPlant();
+        const clip = this.pickVoiceClip(targetPlant);
         const drops = 3;
         const difficultyProgress = 1 - (this.secondsLeft / 120);
         const fallSpeed = Phaser.Math.Linear(110, 220, difficultyProgress);
@@ -191,24 +203,19 @@ export class Game extends Scene
 
         cluster.add([cloud, d1, d2, d3, marker]);
 
-        const cueTimer = this.time.addEvent({
-            delay: 500,
-            loop: true,
-            callback: () => this.playVoiceCue(targetPlant)
-        });
-
-        this.playVoiceCue(targetPlant);
+        const voiceSound = this.startClusterVoice(clip.key);
 
         this.activeCluster = {
             container: cluster,
             targetPlant,
             drops,
             fallSpeed,
-            cueTimer
+            voiceClip: clip,
+            voiceSound
         };
 
-        const targetLabel = targetPlant === 'lupinus' ? 'Lupinus' : 'Mushroom';
-        this.hintText.setText(`Voice target: ${targetLabel}  |  +10 per correct drop, -5 per wrong drop`);
+        const targetLabel = targetPlant === 'lupinus' ? 'Lupinus (M voice)' : 'Mushroom (F voice)';
+        this.hintText.setText(`L${this.difficultyLevel} | ${clip.difficulty}-${clip.gender} | Target: ${targetLabel}`);
     }
 
     private moveCluster (delta: number)
@@ -225,11 +232,6 @@ export class Game extends Scene
         {
             const dx = (moveLeft ? -1 : 1) * 280 * (delta / 1000);
             this.activeCluster.container.x = Phaser.Math.Clamp(this.activeCluster.container.x + dx, 68, this.scale.width - 68);
-
-            if (this.audioContext && this.audioContext.state === 'suspended')
-            {
-                void this.audioContext.resume();
-            }
 
             this.drawWind(this.activeCluster.container.x, this.activeCluster.container.y, moveLeft ? -1 : 1);
         }
@@ -275,13 +277,20 @@ export class Game extends Scene
             this.updatePlantVisual(wateredPlant);
         }
 
+        const transitionMessage = this.updateDifficultyByResult(correct);
+
         this.updateHud();
         this.showLandingFeedback(correct, delta, landedX);
 
-        this.activeCluster.cueTimer.destroy();
+        this.stopClusterVoice(this.activeCluster.voiceSound);
         this.activeCluster.container.destroy();
         this.activeCluster = null;
         this.windFx.clear();
+
+        if (transitionMessage)
+        {
+            this.hintText.setText(transitionMessage);
+        }
 
         if (this.plants.lupinus.hits >= 10 && this.plants.mushroom.hits >= 10)
         {
@@ -320,6 +329,121 @@ export class Game extends Scene
         }
 
         return lupinus < mushroom ? 'lupinus' : 'mushroom';
+    }
+
+    private pickVoiceClip (targetPlant: PlantId): VoiceClip
+    {
+        const requiredGender: VoiceGender = targetPlant === 'lupinus' ? 'M' : 'F';
+        const allowedDifficulties = this.getAllowedDifficulties();
+
+        const candidates = VOICE_CLIPS.filter((clip) => (
+            allowedDifficulties.includes(clip.difficulty) && clip.gender === requiredGender
+        ));
+
+        if (candidates.length > 0)
+        {
+            return candidates[Math.floor(Math.random() * candidates.length)];
+        }
+
+        const fallback = VOICE_CLIPS.find((clip) => clip.gender === requiredGender) ?? VOICE_CLIPS[0];
+        return fallback;
+    }
+
+    private getAllowedDifficulties (): DifficultyClass[]
+    {
+        if (this.difficultyLevel === 1)
+        {
+            return ['D1', 'D2'];
+        }
+
+        if (this.difficultyLevel === 2)
+        {
+            return ['D3'];
+        }
+
+        return ['D1', 'D2', 'D3'];
+    }
+
+    private updateDifficultyByResult (correct: boolean): string | null
+    {
+        if (this.difficultyLevel === 1)
+        {
+            if (correct)
+            {
+                this.levelCorrectCount += 1;
+
+                if (this.levelCorrectCount >= 3)
+                {
+                    this.difficultyLevel = 2;
+                    this.levelCorrectCount = 0;
+                    this.level2WrongStreak = 0;
+                    return 'Difficulty up: Level 2 (D3 only)';
+                }
+            }
+
+            return null;
+        }
+
+        if (this.difficultyLevel === 2)
+        {
+            if (correct)
+            {
+                this.levelCorrectCount += 1;
+                this.level2WrongStreak = 0;
+
+                if (this.levelCorrectCount >= 3)
+                {
+                    this.difficultyLevel = 3;
+                    this.levelCorrectCount = 0;
+                    this.level2WrongStreak = 0;
+                    return 'Difficulty up: Level 3 (D1/D2/D3 mixed)';
+                }
+            }
+            else
+            {
+                this.level2WrongStreak += 1;
+
+                if (this.level2WrongStreak >= 2)
+                {
+                    this.difficultyLevel = 1;
+                    this.levelCorrectCount = 0;
+                    this.level2WrongStreak = 0;
+                    return 'Difficulty down: Back to Level 1 (D1/D2)';
+                }
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    private startClusterVoice (key: string): Phaser.Sound.BaseSound | null
+    {
+        if (!this.cache.audio.exists(key))
+        {
+            return null;
+        }
+
+        const voice = this.sound.add(key, {
+            loop: false,
+            volume: 1
+        });
+
+        voice.play();
+
+        return voice;
+    }
+
+    private stopClusterVoice (voiceSound: Phaser.Sound.BaseSound | null)
+    {
+        if (!voiceSound)
+        {
+            return;
+        }
+
+        voiceSound.stop();
+        voiceSound.destroy();
     }
 
     private updatePlantVisual (id: PlantId)
@@ -386,7 +510,7 @@ export class Game extends Scene
 
         if (this.activeCluster)
         {
-            this.activeCluster.cueTimer.destroy();
+            this.stopClusterVoice(this.activeCluster.voiceSound);
             this.activeCluster.container.destroy();
             this.activeCluster = null;
         }
@@ -399,45 +523,5 @@ export class Game extends Scene
                 mushroomHits: this.plants.mushroom.hits
             });
         });
-    }
-
-    private playVoiceCue (target: PlantId)
-    {
-        if (this.roundOver)
-        {
-            return;
-        }
-
-        if (!this.audioContext)
-        {
-            this.audioContext = new window.AudioContext();
-        }
-
-        if (this.audioContext.state === 'suspended')
-        {
-            return;
-        }
-
-        const difficultyProgress = 1 - (this.secondsLeft / 120);
-        const frequencyGap = Phaser.Math.Linear(220, 90, difficultyProgress);
-        const baseFrequency = 220;
-        const frequency = target === 'lupinus' ? baseFrequency : (baseFrequency + frequencyGap);
-
-        const now = this.audioContext.currentTime;
-        const osc = this.audioContext.createOscillator();
-        const gain = this.audioContext.createGain();
-
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(frequency, now);
-
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.06, now + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
-
-        osc.connect(gain);
-        gain.connect(this.audioContext.destination);
-
-        osc.start(now);
-        osc.stop(now + 0.18);
     }
 }

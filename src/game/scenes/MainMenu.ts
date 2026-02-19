@@ -26,7 +26,7 @@ export class MainMenu extends Scene
             strokeThickness: 6
         }).setOrigin(0.5);
 
-        this.add.text(width / 2, 210, 'Demo 0.1', {
+        this.add.text(width / 2, 210, 'Demo 0.11', {
             fontFamily: 'Arial',
             fontSize: 28,
             color: '#0f172a'
