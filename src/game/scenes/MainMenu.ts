@@ -4,10 +4,7 @@ import { EventBus } from '../EventBus';
 
 export class MainMenu extends Scene
 {
-    background: GameObjects.Image;
-    logo: GameObjects.Image;
-    title: GameObjects.Text;
-    logoTween: Phaser.Tweens.Tween | null;
+    startButton: GameObjects.Text;
 
     constructor ()
     {
@@ -16,61 +13,65 @@ export class MainMenu extends Scene
 
     create ()
     {
-        this.background = this.add.image(512, 384, 'background');
+        const { width, height } = this.scale;
 
-        this.logo = this.add.image(512, 300, 'logo').setDepth(100);
+        this.add.rectangle(width / 2, height / 2, width, height, 0x9fd8ff);
+        this.add.rectangle(width / 2, height - 90, width, 180, 0x6a4a3a);
 
-        this.title = this.add.text(512, 460, 'Main Menu', {
-            fontFamily: 'Arial Black', fontSize: 38, color: '#ffffff',
-            stroke: '#000000', strokeThickness: 8,
-            align: 'center'
-        }).setOrigin(0.5).setDepth(100);
+        this.add.text(width / 2, 120, 'VOICE PLANT', {
+            fontFamily: 'Arial Black',
+            fontSize: 64,
+            color: '#1f2937',
+            stroke: '#ffffff',
+            strokeThickness: 6
+        }).setOrigin(0.5);
+
+        this.add.text(width / 2, 210, 'Demo 0.1', {
+            fontFamily: 'Arial',
+            fontSize: 28,
+            color: '#0f172a'
+        }).setOrigin(0.5);
+
+        this.add.text(width / 2, 290, 'Time Attack (2:00)', {
+            fontFamily: 'Arial',
+            fontSize: 28,
+            color: '#111827',
+            align: 'center',
+            lineSpacing: 8
+        }).setOrigin(0.5);
+
+        this.startButton = this.add.text(width / 2, 470, 'START TIME ATTACK', {
+            fontFamily: 'Arial Black',
+            fontSize: 40,
+            color: '#ffffff',
+            backgroundColor: '#2563eb',
+            padding: { x: 24, y: 12 }
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+        this.startButton.on('pointerdown', () => {
+            this.startGame();
+        });
+
+
+        this.add.text(width / 2, 620, 'Press ENTER or SPACE to start', {
+            fontFamily: 'Arial',
+            fontSize: 24,
+            color: '#0f172a'
+        }).setOrigin(0.5);
+
+        this.input.keyboard?.once('keydown-ENTER', () => this.startGame());
+        this.input.keyboard?.once('keydown-SPACE', () => this.startGame());
 
         EventBus.emit('current-scene-ready', this);
     }
-    
+
     changeScene ()
     {
-        if (this.logoTween)
-        {
-            this.logoTween.stop();
-            this.logoTween = null;
-        }
-
-        this.scene.start('Game');
+        this.startGame();
     }
 
-    moveLogo (vueCallback: ({ x, y }: { x: number, y: number }) => void)
+    private startGame ()
     {
-        if (this.logoTween)
-        {
-            if (this.logoTween.isPlaying())
-            {
-                this.logoTween.pause();
-            }
-            else
-            {
-                this.logoTween.play();
-            }
-        } 
-        else
-        {
-            this.logoTween = this.tweens.add({
-                targets: this.logo,
-                x: { value: 750, duration: 3000, ease: 'Back.easeInOut' },
-                y: { value: 80, duration: 1500, ease: 'Sine.easeOut' },
-                yoyo: true,
-                repeat: -1,
-                onUpdate: () => {
-                    if (vueCallback)
-                    {
-                        vueCallback({
-                            x: Math.floor(this.logo.x),
-                            y: Math.floor(this.logo.y)
-                        });
-                    }
-                }
-            });
-        }
+        this.scene.start('Game', { mode: 'time-attack' });
     }
 }
