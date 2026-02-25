@@ -77,7 +77,7 @@ export class Game extends Scene
         const { width, height } = this.scale;
 
         this.add.rectangle(width / 2, height / 2, width, height, 0x0f1519);
-        this.add.rectangle(width / 2, height - 86, width, 172, 0x6d4c41);
+        this.add.rectangle(width / 2, height - 86, width, 172, 0xa36d00);
 
         const hud = createGameHud(this, width);
         this.scoreText = hud.scoreText;
@@ -186,17 +186,11 @@ export class Game extends Scene
         const fallSpeed = Phaser.Math.Linear(110, 220, difficultyProgress);
 
         const cluster = this.add.container(this.scale.width / 2, 184);
-        const cloud = this.add.ellipse(0, -20, 120, 56, 0xe2e8f0).setStrokeStyle(2, 0x64748b);
         const d1 = this.add.ellipse(-24, 12, 20, 28, 0x38bdf8).setStrokeStyle(1, 0x0369a1);
         const d2 = this.add.ellipse(0, 20, 20, 28, 0x38bdf8).setStrokeStyle(1, 0x0369a1);
         const d3 = this.add.ellipse(24, 12, 20, 28, 0x38bdf8).setStrokeStyle(1, 0x0369a1);
-        const marker = this.add.text(0, -21, targetPlant === 'lupinus' ? 'L' : 'M', {
-            fontFamily: 'Arial Black',
-            fontSize: 24,
-            color: '#0f172a'
-        }).setOrigin(0.5);
 
-        cluster.add([cloud, d1, d2, d3, marker]);
+        cluster.add([d1, d2, d3]);
 
         const voiceSound = startClusterVoice(this, clip.key);
 

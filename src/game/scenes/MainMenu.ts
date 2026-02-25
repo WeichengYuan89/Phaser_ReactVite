@@ -16,7 +16,7 @@ export class MainMenu extends Scene
         const { width, height } = this.scale;
 
         this.add.rectangle(width / 2, height / 2, width, height, 0xf1519);
-        this.add.rectangle(width / 2, height - 90, width, 180, 0x6a4a3a);
+        this.add.rectangle(width / 2, height - 90, width, 180, 0xa36d00);
 
         this.add.text(width / 2, 120, 'VOICE PLANT', {
             fontFamily: 'Arial Black',

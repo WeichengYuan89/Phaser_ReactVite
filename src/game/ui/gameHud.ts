@@ -10,13 +10,13 @@ export interface GameHud
 export function createGameHud (scene: Scene, width: number): GameHud
 {
 
-    const scoreText = scene.add.text(30, 66, 'Score: 0', {
+    const scoreText = scene.add.text(30, 20, 'Score: 0', {
         fontFamily: 'Arial Black',
         fontSize: 34,
         color: '#f8fafc'
     });
 
-    const timerText = scene.add.text(width - 30, 66, 'Time: 2:00', {
+    const timerText = scene.add.text(width - 30, 20, 'Time: 2:00', {
         fontFamily: 'Arial Black',
         fontSize: 34,
         color: '#f8fafc'
