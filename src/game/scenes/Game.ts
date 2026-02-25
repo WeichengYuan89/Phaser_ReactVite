@@ -10,7 +10,7 @@ import {
     resolveLandingResult,
     updateDifficultyStateByResult
 } from '../systems/gameplaySystem';
-import { createGameHud, drawWindFx, showLandingFeedback, updateGameHud } from '../ui/gameHud';
+import { createGameHud, showLandingFeedback, updateGameHud } from '../ui/gameHud';
 import { VoiceClip, VOICE_CLIPS } from '../utils/audioCatalog';
 
 interface PlantState
@@ -228,7 +228,7 @@ export class Game extends Scene
             const dx = (moveLeft ? -1 : 1) * 280 * (delta / 1000);
             this.activeCluster.container.x = Phaser.Math.Clamp(this.activeCluster.container.x + dx, 68, this.scale.width - 68);
 
-            drawWindFx(this.windFx, this.activeCluster.container.x, this.activeCluster.container.y, moveLeft ? -1 : 1);
+            // drawWindFx(this.windFx, this.activeCluster.container.x, this.activeCluster.container.y, moveLeft ? -1 : 1);
         }
         else
         {

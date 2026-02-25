@@ -9,7 +9,6 @@ export interface GameHud
 
 export function createGameHud (scene: Scene, width: number): GameHud
 {
-    scene.add.rectangle(width / 2, 90, width, 80, 0x0f172a, 0.92);
 
     const scoreText = scene.add.text(30, 66, 'Score: 0', {
         fontFamily: 'Arial Black',
@@ -23,7 +22,7 @@ export function createGameHud (scene: Scene, width: number): GameHud
         color: '#f8fafc'
     }).setOrigin(1, 0);
 
-    const hintText = scene.add.text(width / 2, 140, 'Move with LEFT / RIGHT (or A / D)', {
+    const hintText = scene.add.text(width / 2, 20, 'Move with LEFT / RIGHT (or A / D)', {
         fontFamily: 'Arial',
         fontSize: 22,
         color: '#0f172a',
@@ -62,20 +61,4 @@ export function showLandingFeedback (scene: Scene, correct: boolean, delta: numb
         duration: 850,
         onComplete: () => feedback.destroy()
     });
-}
-
-export function drawWindFx (windFx: GameObjects.Graphics, x: number, y: number, direction: -1 | 1)
-{
-    const offset = direction * 42;
-
-    windFx.clear();
-    windFx.lineStyle(3, 0xffffff, 0.7);
-    windFx.beginPath();
-    windFx.moveTo(x - (offset * 0.4), y - 40);
-    windFx.lineTo(x + offset, y - 30);
-    windFx.moveTo(x - (offset * 0.4), y - 24);
-    windFx.lineTo(x + offset, y - 14);
-    windFx.moveTo(x - (offset * 0.4), y - 8);
-    windFx.lineTo(x + offset, y + 2);
-    windFx.strokePath();
 }
