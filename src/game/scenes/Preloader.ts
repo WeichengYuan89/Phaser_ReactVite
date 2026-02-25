@@ -25,6 +25,7 @@ export class Preloader extends Scene
     preload ()
     {
         this.load.setPath('assets');
+        this.load.multiatlas('cactus', 'Sprite/cactus/cactussheet.json', 'assets/Sprite/cactus/');
 
         for (const clip of VOICE_CLIPS)
         {

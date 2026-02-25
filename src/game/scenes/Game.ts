@@ -18,8 +18,9 @@ interface PlantState
     id: PlantId;
     x: number;
     hits: number;
-    stem: Phaser.GameObjects.Rectangle;
-    crown: Phaser.GameObjects.Ellipse;
+    stem?: Phaser.GameObjects.Rectangle;
+    crown?: Phaser.GameObjects.Ellipse;
+    stageSprite?: Phaser.GameObjects.Sprite;
     label: Phaser.GameObjects.Text;
 }
 
@@ -86,7 +87,7 @@ export class Game extends Scene
         this.windFx = this.add.graphics();
 
         this.plants.lupinus = this.createPlant('lupinus', 280, 0x4caf50, 'Lupinus');
-        this.plants.mushroom = this.createPlant('mushroom', width - 280, 0xef4444, 'Mushroom');
+        this.plants.mushroom = this.createPlant('mushroom', width - 280, 0xef4444, 'Cactus');
 
         this.cursors = this.input.keyboard!.createCursorKeys();
         this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
@@ -153,8 +154,21 @@ export class Game extends Scene
         this.add.rectangle(x, 650, 180, 76, 0x5a3f31);
         this.add.rectangle(x, 622, 124, 14, 0x7c523f);
 
-        const stem = this.add.rectangle(x, 618, 16, 60, 0x2e7d32).setOrigin(0.5, 1);
-        const crown = this.add.ellipse(x, 554, 36, 28, flowerColor);
+        let stem: Phaser.GameObjects.Rectangle | undefined;
+        let crown: Phaser.GameObjects.Ellipse | undefined;
+        let stageSprite: Phaser.GameObjects.Sprite | undefined;
+
+        if (id === 'lupinus')
+        {
+            stem = this.add.rectangle(x, 618, 16, 60, 0x2e7d32).setOrigin(0.5, 1);
+            crown = this.add.ellipse(x, 554, 36, 28, flowerColor);
+        }
+        else
+        {
+            stageSprite = this.add.sprite(x, 620, 'cactus', 'Cactus_Sprite_0.png')
+                .setOrigin(0.5, 1)
+                .setScale(2.05);
+        }
 
         const label = this.add.text(x, 705, `${title}: 0/10`, {
             fontFamily: 'Arial Black',
@@ -168,6 +182,7 @@ export class Game extends Scene
             hits: 0,
             stem,
             crown,
+            stageSprite,
             label
         };
     }
@@ -274,15 +289,25 @@ export class Game extends Scene
     {
         const plant = this.plants[id];
         const progress = plant.hits / 10;
-        const title = id === 'lupinus' ? 'Lupinus' : 'Mushroom';
+        const title = id === 'lupinus' ? 'Lupinus' : 'Cactus';
+        let stage = progress >= 1 ? 'Adult' : (progress >= 0.4 ? 'Growing' : 'Seedling');
 
-        plant.stem.setScale(1, Phaser.Math.Linear(0.55, 2.7, progress));
-        plant.crown.setDisplaySize(
-            Phaser.Math.Linear(34, 108, progress),
-            Phaser.Math.Linear(24, 82, progress)
-        );
+        if (id === 'lupinus' && plant.stem && plant.crown)
+        {
+            plant.stem.setScale(1, Phaser.Math.Linear(0.55, 2.7, progress));
+            plant.crown.setDisplaySize(
+                Phaser.Math.Linear(34, 108, progress),
+                Phaser.Math.Linear(24, 82, progress)
+            );
+        }
+        else if (id === 'mushroom' && plant.stageSprite)
+        {
+            const stageIndex = Math.min(4, Math.floor(plant.hits / 2));
+            plant.stageSprite.setFrame(`Cactus_Sprite_${stageIndex}.png`);
 
-        const stage = progress >= 1 ? 'Adult' : (progress >= 0.4 ? 'Growing' : 'Seedling');
+            stage = stageIndex === 4 ? 'Adult' : `Stage ${stageIndex + 1}`;
+        }
+
         plant.label.setText(`${title} ${stage}: ${plant.hits}/10`);
     }
 
