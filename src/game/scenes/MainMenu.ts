@@ -15,7 +15,7 @@ export class MainMenu extends Scene
     {
         const { width, height } = this.scale;
 
-        this.add.rectangle(width / 2, height / 2, width, height, 0x9fd8ff);
+        this.add.rectangle(width / 2, height / 2, width, height, 0xf1519);
         this.add.rectangle(width / 2, height - 90, width, 180, 0x6a4a3a);
 
         this.add.text(width / 2, 120, 'VOICE PLANT', {
@@ -29,22 +29,22 @@ export class MainMenu extends Scene
         this.add.text(width / 2, 210, 'Demo 0.11', {
             fontFamily: 'Arial',
             fontSize: 28,
-            color: '#0f172a'
+            color: '#ffffff'
         }).setOrigin(0.5);
 
         this.add.text(width / 2, 290, 'Time Attack (2:00)', {
             fontFamily: 'Arial',
             fontSize: 28,
-            color: '#111827',
+            color: '#ffffff',
             align: 'center',
             lineSpacing: 8
         }).setOrigin(0.5);
 
-        this.startButton = this.add.text(width / 2, 470, 'START TIME ATTACK', {
+        this.startButton = this.add.text(width / 2, 470, 'START', {
             fontFamily: 'Arial Black',
             fontSize: 40,
-            color: '#ffffff',
-            backgroundColor: '#2563eb',
+            color: '#1f2937',
+            backgroundColor: '#131415',
             padding: { x: 24, y: 12 }
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 

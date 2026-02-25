@@ -1,10 +1,17 @@
 import { Scene } from 'phaser';
 
+import { startClusterVoice, stopClusterVoice } from '../audio/voiceAudio';
 import { EventBus } from '../EventBus';
-import { DifficultyClass, VoiceClip, VoiceGender, VOICE_CLIPS } from '../audioCatalog';
-
-type PlantId = 'lupinus' | 'mushroom';
-type DifficultyLevel = 1 | 2 | 3;
+import {
+    DifficultyState,
+    PlantId,
+    pickTargetPlantByHits,
+    pickVoiceClipForTarget,
+    resolveLandingResult,
+    updateDifficultyStateByResult
+} from '../systems/gameplaySystem';
+import { createGameHud, drawWindFx, showLandingFeedback, updateGameHud } from '../ui/gameHud';
+import { VoiceClip, VOICE_CLIPS } from '../utils/audioCatalog';
 
 interface PlantState
 {
@@ -47,9 +54,7 @@ export class Game extends Scene
     private score: number;
     private secondsLeft: number;
     private roundOver: boolean;
-    private difficultyLevel: DifficultyLevel;
-    private levelCorrectCount: number;
-    private level2WrongStreak: number;
+    private difficultyState: DifficultyState;
 
     constructor ()
     {
@@ -60,38 +65,24 @@ export class Game extends Scene
         this.score = 0;
         this.secondsLeft = 120;
         this.roundOver = false;
-        this.difficultyLevel = 1;
-        this.levelCorrectCount = 0;
-        this.level2WrongStreak = 0;
+        this.difficultyState = {
+            difficultyLevel: 1,
+            levelCorrectCount: 0,
+            level2WrongStreak: 0
+        };
     }
 
     create (data: GameInitData)
     {
         const { width, height } = this.scale;
 
-        this.add.rectangle(width / 2, height / 2, width, height, 0xa5d8ff);
+        this.add.rectangle(width / 2, height / 2, width, height, 0x0f1519);
         this.add.rectangle(width / 2, height - 86, width, 172, 0x6d4c41);
 
-        this.add.rectangle(width / 2, 90, width, 80, 0x0f172a, 0.92);
-        this.scoreText = this.add.text(30, 66, 'Score: 0', {
-            fontFamily: 'Arial Black',
-            fontSize: 34,
-            color: '#f8fafc'
-        });
-        this.timerText = this.add.text(width - 30, 66, 'Time: 2:00', {
-            fontFamily: 'Arial Black',
-            fontSize: 34,
-            color: '#f8fafc'
-        }).setOrigin(1, 0);
-
-        this.hintText = this.add.text(width / 2, 140, 'Move with LEFT / RIGHT (or A / D)', {
-            fontFamily: 'Arial',
-            fontSize: 22,
-            color: '#0f172a',
-            backgroundColor: '#ffffffcc',
-            padding: { x: 12, y: 6 }
-        }).setOrigin(0.5);
-
+        const hud = createGameHud(this, width);
+        this.scoreText = hud.scoreText;
+        this.timerText = hud.timerText;
+        this.hintText = hud.hintText;
         this.windFx = this.add.graphics();
 
         this.plants.lupinus = this.createPlant('lupinus', 280, 0x4caf50, 'Lupinus');
@@ -104,11 +95,13 @@ export class Game extends Scene
         this.score = 0;
         this.secondsLeft = 120;
         this.roundOver = false;
-        this.difficultyLevel = 1;
-        this.levelCorrectCount = 0;
-        this.level2WrongStreak = 0;
+        this.difficultyState = {
+            difficultyLevel: 1,
+            levelCorrectCount: 0,
+            level2WrongStreak: 0
+        };
 
-        this.updateHud();
+        updateGameHud({ scoreText: this.scoreText, timerText: this.timerText }, this.score, this.secondsLeft);
         this.updatePlantVisual('lupinus');
         this.updatePlantVisual('mushroom');
 
@@ -141,15 +134,17 @@ export class Game extends Scene
             return;
         }
 
-        if (this.activeCluster)
+        if (!this.activeCluster)
         {
-            this.moveCluster(delta);
-            this.activeCluster.container.y += this.activeCluster.fallSpeed * (delta / 1000);
+            return;
+        }
 
-            if (this.activeCluster.container.y >= 628)
-            {
-                this.resolveClusterLanding();
-            }
+        this.moveCluster(delta);
+        this.activeCluster.container.y += this.activeCluster.fallSpeed * (delta / 1000);
+
+        if (this.activeCluster.container.y >= 628)
+        {
+            this.resolveClusterLanding();
         }
     }
 
@@ -184,8 +179,8 @@ export class Game extends Scene
             return;
         }
 
-        const targetPlant = this.pickTargetPlant();
-        const clip = this.pickVoiceClip(targetPlant);
+        const targetPlant = pickTargetPlantByHits(this.plants.lupinus.hits, this.plants.mushroom.hits);
+        const clip = pickVoiceClipForTarget(targetPlant, this.difficultyState.difficultyLevel, VOICE_CLIPS);
         const drops = 3;
         const difficultyProgress = 1 - (this.secondsLeft / 120);
         const fallSpeed = Phaser.Math.Linear(110, 220, difficultyProgress);
@@ -203,7 +198,7 @@ export class Game extends Scene
 
         cluster.add([cloud, d1, d2, d3, marker]);
 
-        const voiceSound = this.startClusterVoice(clip.key);
+        const voiceSound = startClusterVoice(this, clip.key);
 
         this.activeCluster = {
             container: cluster,
@@ -215,7 +210,7 @@ export class Game extends Scene
         };
 
         const targetLabel = targetPlant === 'lupinus' ? 'Lupinus (M voice)' : 'Mushroom (F voice)';
-        this.hintText.setText(`L${this.difficultyLevel} | ${clip.difficulty}-${clip.gender} | Target: ${targetLabel}`);
+        this.hintText.setText(`L${this.difficultyState.difficultyLevel} | ${clip.difficulty}-${clip.gender} | Target: ${targetLabel}`);
     }
 
     private moveCluster (delta: number)
@@ -233,28 +228,12 @@ export class Game extends Scene
             const dx = (moveLeft ? -1 : 1) * 280 * (delta / 1000);
             this.activeCluster.container.x = Phaser.Math.Clamp(this.activeCluster.container.x + dx, 68, this.scale.width - 68);
 
-            this.drawWind(this.activeCluster.container.x, this.activeCluster.container.y, moveLeft ? -1 : 1);
+            drawWindFx(this.windFx, this.activeCluster.container.x, this.activeCluster.container.y, moveLeft ? -1 : 1);
         }
         else
         {
             this.windFx.clear();
         }
-    }
-
-    private drawWind (x: number, y: number, direction: -1 | 1)
-    {
-        const offset = direction * 42;
-
-        this.windFx.clear();
-        this.windFx.lineStyle(3, 0xffffff, 0.7);
-        this.windFx.beginPath();
-        this.windFx.moveTo(x - (offset * 0.4), y - 40);
-        this.windFx.lineTo(x + offset, y - 30);
-        this.windFx.moveTo(x - (offset * 0.4), y - 24);
-        this.windFx.lineTo(x + offset, y - 14);
-        this.windFx.moveTo(x - (offset * 0.4), y - 8);
-        this.windFx.lineTo(x + offset, y + 2);
-        this.windFx.strokePath();
     }
 
     private resolveClusterLanding ()
@@ -265,185 +244,36 @@ export class Game extends Scene
         }
 
         const landedX = this.activeCluster.container.x;
-        const wateredPlant: PlantId = landedX < this.scale.width / 2 ? 'lupinus' : 'mushroom';
-        const correct = wateredPlant === this.activeCluster.targetPlant;
-        const delta = correct ? (10 * this.activeCluster.drops) : (-5 * this.activeCluster.drops);
+        const landing = resolveLandingResult(landedX, this.scale.width, this.activeCluster.targetPlant, this.activeCluster.drops);
 
-        this.score += delta;
+        this.score += landing.delta;
 
-        if (correct)
+        if (landing.correct)
         {
-            this.plants[wateredPlant].hits = Math.min(10, this.plants[wateredPlant].hits + this.activeCluster.drops);
-            this.updatePlantVisual(wateredPlant);
+            this.plants[landing.wateredPlant].hits = Math.min(10, this.plants[landing.wateredPlant].hits + this.activeCluster.drops);
+            this.updatePlantVisual(landing.wateredPlant);
         }
 
-        const transitionMessage = this.updateDifficultyByResult(correct);
+        const difficultyUpdate = updateDifficultyStateByResult(this.difficultyState, landing.correct);
+        this.difficultyState = difficultyUpdate.state;
 
-        this.updateHud();
-        this.showLandingFeedback(correct, delta, landedX);
+        updateGameHud({ scoreText: this.scoreText, timerText: this.timerText }, this.score, this.secondsLeft);
+        showLandingFeedback(this, landing.correct, landing.delta, landedX);
 
-        this.stopClusterVoice(this.activeCluster.voiceSound);
+        stopClusterVoice(this.activeCluster.voiceSound);
         this.activeCluster.container.destroy();
         this.activeCluster = null;
         this.windFx.clear();
 
-        if (transitionMessage)
+        if (difficultyUpdate.transitionMessage)
         {
-            this.hintText.setText(transitionMessage);
+            this.hintText.setText(difficultyUpdate.transitionMessage);
         }
 
         if (this.plants.lupinus.hits >= 10 && this.plants.mushroom.hits >= 10)
         {
             this.endRound(true);
         }
-    }
-
-    private showLandingFeedback (correct: boolean, delta: number, x: number)
-    {
-        const msg = correct ? `Correct +${delta}` : `Wrong ${delta}`;
-        const color = correct ? '#16a34a' : '#dc2626';
-
-        const feedback = this.add.text(x, 618, msg, {
-            fontFamily: 'Arial Black',
-            fontSize: 28,
-            color
-        }).setOrigin(0.5, 1);
-
-        this.tweens.add({
-            targets: feedback,
-            y: feedback.y - 80,
-            alpha: 0,
-            duration: 850,
-            onComplete: () => feedback.destroy()
-        });
-    }
-
-    private pickTargetPlant (): PlantId
-    {
-        const lupinus = this.plants.lupinus.hits;
-        const mushroom = this.plants.mushroom.hits;
-
-        if (lupinus === mushroom)
-        {
-            return Math.random() < 0.5 ? 'lupinus' : 'mushroom';
-        }
-
-        return lupinus < mushroom ? 'lupinus' : 'mushroom';
-    }
-
-    private pickVoiceClip (targetPlant: PlantId): VoiceClip
-    {
-        const requiredGender: VoiceGender = targetPlant === 'lupinus' ? 'M' : 'F';
-        const allowedDifficulties = this.getAllowedDifficulties();
-
-        const candidates = VOICE_CLIPS.filter((clip) => (
-            allowedDifficulties.includes(clip.difficulty) && clip.gender === requiredGender
-        ));
-
-        if (candidates.length > 0)
-        {
-            return candidates[Math.floor(Math.random() * candidates.length)];
-        }
-
-        const fallback = VOICE_CLIPS.find((clip) => clip.gender === requiredGender) ?? VOICE_CLIPS[0];
-        return fallback;
-    }
-
-    private getAllowedDifficulties (): DifficultyClass[]
-    {
-        if (this.difficultyLevel === 1)
-        {
-            return ['D1', 'D2'];
-        }
-
-        if (this.difficultyLevel === 2)
-        {
-            return ['D3'];
-        }
-
-        return ['D1', 'D2', 'D3'];
-    }
-
-    private updateDifficultyByResult (correct: boolean): string | null
-    {
-        if (this.difficultyLevel === 1)
-        {
-            if (correct)
-            {
-                this.levelCorrectCount += 1;
-
-                if (this.levelCorrectCount >= 3)
-                {
-                    this.difficultyLevel = 2;
-                    this.levelCorrectCount = 0;
-                    this.level2WrongStreak = 0;
-                    return 'Difficulty up: Level 2 (D3 only)';
-                }
-            }
-
-            return null;
-        }
-
-        if (this.difficultyLevel === 2)
-        {
-            if (correct)
-            {
-                this.levelCorrectCount += 1;
-                this.level2WrongStreak = 0;
-
-                if (this.levelCorrectCount >= 3)
-                {
-                    this.difficultyLevel = 3;
-                    this.levelCorrectCount = 0;
-                    this.level2WrongStreak = 0;
-                    return 'Difficulty up: Level 3 (D1/D2/D3 mixed)';
-                }
-            }
-            else
-            {
-                this.level2WrongStreak += 1;
-
-                if (this.level2WrongStreak >= 2)
-                {
-                    this.difficultyLevel = 1;
-                    this.levelCorrectCount = 0;
-                    this.level2WrongStreak = 0;
-                    return 'Difficulty down: Back to Level 1 (D1/D2)';
-                }
-            }
-
-            return null;
-        }
-
-        return null;
-    }
-
-    private startClusterVoice (key: string): Phaser.Sound.BaseSound | null
-    {
-        if (!this.cache.audio.exists(key))
-        {
-            return null;
-        }
-
-        const voice = this.sound.add(key, {
-            loop: false,
-            volume: 1
-        });
-
-        voice.play();
-
-        return voice;
-    }
-
-    private stopClusterVoice (voiceSound: Phaser.Sound.BaseSound | null)
-    {
-        if (!voiceSound)
-        {
-            return;
-        }
-
-        voiceSound.stop();
-        voiceSound.destroy();
     }
 
     private updatePlantVisual (id: PlantId)
@@ -470,23 +300,13 @@ export class Game extends Scene
         }
 
         this.secondsLeft -= 1;
-        this.updateHud();
+        updateGameHud({ scoreText: this.scoreText, timerText: this.timerText }, this.score, this.secondsLeft);
 
         if (this.secondsLeft <= 0)
         {
             const bothAdult = this.plants.lupinus.hits >= 10 && this.plants.mushroom.hits >= 10;
             this.endRound(bothAdult);
         }
-    }
-
-    private updateHud ()
-    {
-        const minutes = Math.floor(this.secondsLeft / 60);
-        const seconds = this.secondsLeft % 60;
-        const secondText = seconds < 10 ? `0${seconds}` : `${seconds}`;
-
-        this.scoreText.setText(`Score: ${this.score}`);
-        this.timerText.setText(`Time: ${minutes}:${secondText}`);
     }
 
     private endRound (win: boolean)
@@ -510,7 +330,7 @@ export class Game extends Scene
 
         if (this.activeCluster)
         {
-            this.stopClusterVoice(this.activeCluster.voiceSound);
+            stopClusterVoice(this.activeCluster.voiceSound);
             this.activeCluster.container.destroy();
             this.activeCluster = null;
         }

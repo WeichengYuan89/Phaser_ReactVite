@@ -1,6 +1,6 @@
 import { Scene } from 'phaser';
 
-import { VOICE_CLIPS } from '../audioCatalog';
+import { VOICE_CLIPS } from '../utils/audioCatalog';
 
 export class Preloader extends Scene
 {
