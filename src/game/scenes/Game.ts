@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
 
 import { startClusterVoice, stopClusterVoice } from '../audio/voiceAudio';
+import { createRainTrail, RainTrail } from '../effects/rainTrail';
 import { EventBus } from '../EventBus';
 import {
     DifficultyState,
@@ -28,6 +29,7 @@ interface ClusterState
     targetPlant: PlantId;
     drops: number;
     fallSpeed: number;
+    trail: RainTrail | null;
     voiceClip: VoiceClip;
     voiceSound: Phaser.Sound.BaseSound | null;
 }
@@ -138,8 +140,19 @@ export class Game extends Scene
             return;
         }
 
+        const prevX = this.activeCluster.container.x;
+        const prevY = this.activeCluster.container.y;
+
         this.moveCluster(delta);
         this.activeCluster.container.y += this.activeCluster.fallSpeed * (delta / 1000);
+
+        if (this.activeCluster.trail && delta > 0)
+        {
+            const dt = delta / 1000;
+            const vx = (this.activeCluster.container.x - prevX) / dt;
+            const vy = (this.activeCluster.container.y - prevY) / dt;
+            this.activeCluster.trail.updateVelocity(vx, vy);
+        }
 
         if (this.activeCluster.container.y >= 628)
         {
@@ -203,12 +216,15 @@ export class Game extends Scene
         cluster.add([d1, d2, d3]);
 
         const voiceSound = startClusterVoice(this, clip.key);
+        const trail = createRainTrail(this, cluster, { offsetY: 14, maxSpeed: 200 });
+        trail.updateVelocity(0, fallSpeed);
 
         this.activeCluster = {
             container: cluster,
             targetPlant,
             drops,
             fallSpeed,
+            trail,
             voiceClip: clip,
             voiceSound
         };
@@ -265,6 +281,7 @@ export class Game extends Scene
         showLandingFeedback(this, landing.correct, landing.delta, landedX);
 
         stopClusterVoice(this.activeCluster.voiceSound);
+        this.activeCluster.trail?.destroy();
         this.activeCluster.container.destroy();
         this.activeCluster = null;
         this.windFx.clear();
@@ -341,6 +358,7 @@ export class Game extends Scene
         if (this.activeCluster)
         {
             stopClusterVoice(this.activeCluster.voiceSound);
+            this.activeCluster.trail?.destroy();
             this.activeCluster.container.destroy();
             this.activeCluster = null;
         }
