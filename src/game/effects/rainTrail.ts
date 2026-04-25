@@ -17,33 +17,21 @@ export function createRainTrail (scene: Scene, target: GameObjects.GameObject & 
     let velocityY = 0;
 
     const getSpeed = () => Math.sqrt((velocityX * velocityX) + (velocityY * velocityY));
-    const getAngle = () =>
-    {
-        if (velocityX === 0 && velocityY === 0)
-        {
-            return 270; // default: emit upward when stationary
-        }
-        return Phaser.Math.RadToDeg(Math.atan2(velocityY, velocityX)) + 180;
-    };
 
-    // Adapts Phaser's thrust.js style: speed = body speed, lifespan/alpha
-    // scale with motion, ADD blend for a glowing trail. Unlike thrust.js we
-    // constrain the emission angle to the opposite of the velocity vector so
-    // particles stream behind the falling cluster instead of spraying 360°.
+    // Mirrors Phaser's "scene config" example: each emission point is a small
+    // 360° puff (speed > 0) rather than a single static dot. Successive puffs
+    // overlap in space, so ADD-blending smooths the corners on sharp turns and
+    // particles keep drifting outward after emission, giving the "floating then
+    // fading" feel of the reference.
     const emitter = scene.add.particles(0, 0, RAIN_PARTICLE_TEXTURE, {
-        speed: {
-            onEmit: () => getSpeed() *0.5
-        },
+        speed: 50,
         lifespan: {
             onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed) * 10000
         },
         alpha: {
-            onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed) * 1000
+            onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed)
         },
-        angle: {
-            onEmit: () => getAngle() + Phaser.Math.Between(-12, 12)
-        },
-        scale: { start: 3.0, end: 0 },
+        scale: { start: 1.0, end: 0 },
         blendMode: 'ADD'
     });
 
