@@ -27,6 +27,7 @@ export class Preloader extends Scene
         this.load.setPath('assets');
         this.load.multiatlas('flowers', 'Sprite/Flower/flowersheet.json', 'assets/Sprite/Flower/');
         this.load.multiatlas('cactus', 'Sprite/cactus/cactussheet.json', 'assets/Sprite/cactus/');
+        this.load.image('rain-particle', 'Sprite/Particles/blue.png');
 
         for (const clip of VOICE_CLIPS)
         {

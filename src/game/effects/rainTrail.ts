@@ -26,12 +26,12 @@ export function createRainTrail (scene: Scene, target: GameObjects.GameObject & 
     const emitter = scene.add.particles(0, 0, RAIN_PARTICLE_TEXTURE, {
         speed: 50,
         lifespan: {
-            onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed) * 10000
+            onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed) * 7000
         },
         alpha: {
             onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed)
         },
-        scale: { start: 1.0, end: 0 },
+        scale: { start: 0.5, end: 0 },
         blendMode: 'ADD'
     });
 
