@@ -22,7 +22,7 @@ export function createGameHud (scene: Scene, width: number): GameHud
         color: '#f8fafc'
     }).setOrigin(1, 0);
 
-    const hintText = scene.add.text(width / 2, 20, 'Move with LEFT / RIGHT (or A / D)', {
+    const hintText = scene.add.text(width / 2, 20, 'Move LEFT / RIGHT (A / D)  •  SHIFT to hold', {
         fontFamily: 'Arial',
         fontSize: 22,
         color: '#0f172a',

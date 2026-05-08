@@ -2,6 +2,7 @@ import { Scene } from 'phaser';
 
 import { startClusterVoice, stopClusterVoice } from '../audio/voiceAudio';
 import { createRainTrail, RainTrail } from '../effects/rainTrail';
+import { createWaterBucket, WaterBucket } from '../effects/waterBucket';
 import { EventBus } from '../EventBus';
 import {
     DifficultyState,
@@ -23,6 +24,8 @@ interface PlantState
     label: Phaser.GameObjects.Text;
 }
 
+type ClusterPhase = 'falling' | 'held';
+
 interface ClusterState
 {
     container: Phaser.GameObjects.Container;
@@ -32,6 +35,7 @@ interface ClusterState
     trail: RainTrail | null;
     voiceClip: VoiceClip;
     voiceSound: Phaser.Sound.BaseSound | null;
+    phase: ClusterPhase;
 }
 
 interface GameInitData
@@ -44,8 +48,10 @@ export class Game extends Scene
     private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
     private keyA: Phaser.Input.Keyboard.Key;
     private keyD: Phaser.Input.Keyboard.Key;
+    private keyShift: Phaser.Input.Keyboard.Key;
     private plants: Record<PlantId, PlantState>;
     private activeCluster: ClusterState | null;
+    private waterBucket: WaterBucket;
     private clusterSpawnTimer: Phaser.Time.TimerEvent;
     private secondTimer: Phaser.Time.TimerEvent;
     private scoreText: Phaser.GameObjects.Text;
@@ -92,6 +98,14 @@ export class Game extends Scene
         this.cursors = this.input.keyboard!.createCursorKeys();
         this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+        this.keyShift = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+
+        this.waterBucket = createWaterBucket(this, {
+            x: 92,
+            bottomY: 590,
+            width: 84,
+            height: 130
+        });
 
         this.score = 0;
         this.secondsLeft = 120;
@@ -137,6 +151,17 @@ export class Game extends Scene
 
         if (!this.activeCluster)
         {
+            return;
+        }
+
+        if (this.activeCluster.phase === 'held')
+        {
+            return;
+        }
+
+        if (Phaser.Input.Keyboard.JustDown(this.keyShift))
+        {
+            this.holdActiveCluster();
             return;
         }
 
@@ -208,12 +233,10 @@ export class Game extends Scene
         const difficultyProgress = 1 - (this.secondsLeft / 120);
         const fallSpeed = Phaser.Math.Linear(110, 220, difficultyProgress);
 
-        const cluster = this.add.container(this.scale.width / 2, 184);
-        const d1 = this.add.ellipse(-24, 12, 20, 28, 0x38bdf8).setStrokeStyle(1, 0x0369a1);
-        const d2 = this.add.ellipse(0, 20, 20, 28, 0x38bdf8).setStrokeStyle(1, 0x0369a1);
-        const d3 = this.add.ellipse(24, 12, 20, 28, 0x38bdf8).setStrokeStyle(1, 0x0369a1);
+        const cluster = this.add.container(this.scale.width / 2, 60);
+        const drop = this.add.image(0, 0, 'rain-particle');
 
-        cluster.add([d1, d2, d3]);
+        cluster.add(drop);
 
         const voiceSound = startClusterVoice(this, clip.key);
         const trail = createRainTrail(this, cluster, { offsetY: 14, maxSpeed: 200 });
@@ -226,7 +249,8 @@ export class Game extends Scene
             fallSpeed,
             trail,
             voiceClip: clip,
-            voiceSound
+            voiceSound,
+            phase: 'falling'
         };
 
         const targetLabel = targetPlant === 'lupinus' ? 'Lupinus (M voice)' : 'Mushroom (F voice)';
@@ -254,6 +278,32 @@ export class Game extends Scene
         {
             this.windFx.clear();
         }
+    }
+
+    private holdActiveCluster ()
+    {
+        if (!this.activeCluster || this.activeCluster.phase !== 'falling')
+        {
+            return;
+        }
+
+        const cluster = this.activeCluster;
+        cluster.phase = 'held';
+
+        stopClusterVoice(cluster.voiceSound);
+        cluster.voiceSound = null;
+        cluster.trail?.destroy();
+        cluster.trail = null;
+        this.windFx.clear();
+
+        this.waterBucket.holdCluster(cluster.container, cluster.voiceClip, () => {
+            cluster.container.destroy();
+
+            if (this.activeCluster === cluster)
+            {
+                this.activeCluster = null;
+            }
+        });
     }
 
     private resolveClusterLanding ()
@@ -362,6 +412,8 @@ export class Game extends Scene
             this.activeCluster.container.destroy();
             this.activeCluster = null;
         }
+
+        this.waterBucket?.destroy();
 
         this.time.delayedCall(350, () => {
             this.scene.start('GameOver', {
