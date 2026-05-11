@@ -101,9 +101,9 @@ export class Game extends Scene
         this.keyShift = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
 
         this.waterBucket = createWaterBucket(this, {
-            x: 92,
+            x: 110,
             bottomY: 590,
-            width: 84,
+            width: 80,
             height: 130
         });
 

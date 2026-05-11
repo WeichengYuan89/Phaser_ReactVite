@@ -1,11 +1,16 @@
-import { GameObjects, Physics, Scene } from 'phaser';
+import { GameObjects, Scene } from 'phaser';
 
 import { VoiceClip } from '../utils/audioCatalog';
 
-const WATER_PARTICLE_TEXTURE = 'rain-particle';
-const PARTICLE_RADIUS = 4;
-const FIRST_HOLD_PARTICLES = 30;
+const FIRST_HOLD_FILL = 0.28;
 const LOG_DECAY = 1.4;
+const WAVE_AMPLITUDE = 3;
+const WAVE_FREQUENCY = 0.004;
+const WAVE_LENGTH = 0.06;
+const WATER_FILL_COLOR = 0x38bdf8;
+const WATER_FILL_ALPHA = 0.92;
+const WATER_HIGHLIGHT_COLOR = 0xbae6fd;
+const SPLASH_TEXTURE = 'rain-particle';
 
 export interface WaterBucketConfig
 {
@@ -29,7 +34,6 @@ export interface WaterBucket
 export function createWaterBucket (scene: Scene, config: WaterBucketConfig): WaterBucket
 {
     const heldClips: VoiceClip[] = [];
-    const particles: Physics.Matter.Image[] = [];
 
     const halfW = config.width / 2;
     const wallThickness = 14;
@@ -37,50 +41,119 @@ export function createWaterBucket (scene: Scene, config: WaterBucketConfig): Wat
     const innerRight = config.x + halfW;
     const innerTop = config.bottomY - config.height;
     const innerBottom = config.bottomY;
-    const wallCenterY = (innerTop + innerBottom) / 2;
 
-    const visual = drawBucketVisual(scene, config, wallThickness);
+    const bucketVisual = drawBucketVisual(scene, config, wallThickness);
 
-    scene.matter.add.rectangle(
-        innerLeft - wallThickness / 2,
-        wallCenterY,
-        wallThickness,
-        config.height + wallThickness,
-        { isStatic: true, label: 'bucket-wall-left' }
-    );
-    scene.matter.add.rectangle(
-        innerRight + wallThickness / 2,
-        wallCenterY,
-        wallThickness,
-        config.height + wallThickness,
-        { isStatic: true, label: 'bucket-wall-right' }
-    );
-    scene.matter.add.rectangle(
-        config.x,
-        innerBottom + wallThickness / 2,
-        config.width + wallThickness * 2,
-        wallThickness,
-        { isStatic: true, label: 'bucket-floor' }
-    );
+    const waterGfx = scene.add.graphics();
+    waterGfx.setDepth(bucketVisual.depth + 1);
 
-    function spawnParticles (count: number)
+    const maskShape = scene.make.graphics({});
+    maskShape.fillStyle(0xffffff);
+    maskShape.fillRect(innerLeft, innerTop, config.width, config.height);
+    waterGfx.setMask(maskShape.createGeometryMask());
+
+    let fillRatio = 0;
+    const splashDrops: GameObjects.Image[] = [];
+
+    function getSurfaceY (): number
     {
-        for (let i = 0; i < count; i++)
+        return innerBottom - (config.height * fillRatio);
+    }
+
+    function renderWater (time: number)
+    {
+        waterGfx.clear();
+
+        if (fillRatio <= 0)
         {
-            const px = Phaser.Math.Between(innerLeft + PARTICLE_RADIUS + 2, innerRight - PARTICLE_RADIUS - 2);
-            const py = innerTop + 10 + Phaser.Math.Between(0, 14);
+            return;
+        }
 
-            const drop = scene.matter.add.image(px, py, WATER_PARTICLE_TEXTURE, undefined, {
-                shape: { type: 'circle', radius: PARTICLE_RADIUS },
-                friction: 0.04,
-                frictionStatic: 0.1,
-                restitution: 0.05,
-                density: 0.01
-            }) as Physics.Matter.Image;
+        const surfaceY = getSurfaceY();
+        const samples = 18;
+        const points: Phaser.Types.Math.Vector2Like[] = [];
 
-            drop.setDisplaySize(PARTICLE_RADIUS * 2.4, PARTICLE_RADIUS * 2.4);
-            drop.setVelocity(Phaser.Math.FloatBetween(-0.5, 0.5), Phaser.Math.FloatBetween(0.4, 1.4));
-            particles.push(drop);
+        for (let i = 0; i <= samples; i++)
+        {
+            const t = i / samples;
+            const x = innerLeft + t * config.width;
+            const y = surfaceY + Math.sin(time * WAVE_FREQUENCY + x * WAVE_LENGTH) * WAVE_AMPLITUDE;
+            points.push({ x, y });
+        }
+
+        points.push({ x: innerRight, y: innerBottom });
+        points.push({ x: innerLeft, y: innerBottom });
+
+        waterGfx.fillStyle(WATER_FILL_COLOR, WATER_FILL_ALPHA);
+        waterGfx.fillPoints(points, true);
+
+        waterGfx.lineStyle(2, WATER_HIGHLIGHT_COLOR, 0.55);
+        waterGfx.beginPath();
+
+        for (let i = 0; i <= samples; i++)
+        {
+            const p = points[i];
+
+            if (i === 0)
+            {
+                waterGfx.moveTo(p.x, p.y);
+            }
+            else
+            {
+                waterGfx.lineTo(p.x, p.y);
+            }
+        }
+
+        waterGfx.strokePath();
+    }
+
+    const updateHandler = () => renderWater(scene.time.now);
+    scene.events.on(Phaser.Scenes.Events.UPDATE, updateHandler);
+
+    function spawnSplash (amount: number)
+    {
+        const surfaceY = getSurfaceY();
+        const dropCount = Phaser.Math.Clamp(Math.round(amount * 30), 4, 9);
+
+        for (let i = 0; i < dropCount; i++)
+        {
+            const startX = config.x + Phaser.Math.Between(-10, 10);
+            const drop = scene.add.image(startX, surfaceY - 2, SPLASH_TEXTURE);
+            drop.setDisplaySize(7, 7);
+            drop.setTint(WATER_FILL_COLOR);
+            drop.setDepth(bucketVisual.depth + 2);
+
+            const dx = Phaser.Math.FloatBetween(-22, 22);
+            const peakDy = Phaser.Math.FloatBetween(22, 38);
+
+            scene.tweens.add({
+                targets: drop,
+                x: drop.x + dx,
+                y: drop.y - peakDy,
+                duration: 220,
+                ease: 'Sine.easeOut',
+                onComplete: () => {
+                    scene.tweens.add({
+                        targets: drop,
+                        y: drop.y + peakDy + 4,
+                        alpha: 0,
+                        duration: 220,
+                        ease: 'Sine.easeIn',
+                        onComplete: () => {
+                            const idx = splashDrops.indexOf(drop);
+
+                            if (idx >= 0)
+                            {
+                                splashDrops.splice(idx, 1);
+                            }
+
+                            drop.destroy();
+                        }
+                    });
+                }
+            });
+
+            splashDrops.push(drop);
         }
     }
 
@@ -91,22 +164,34 @@ export function createWaterBucket (scene: Scene, config: WaterBucketConfig): Wat
     )
     {
         const targetX = config.x;
-        const targetY = innerTop + 16;
+        const targetY = getSurfaceY() - 4;
 
         scene.tweens.add({
             targets: cluster,
             x: targetX,
             y: targetY,
-            scaleX: 0.4,
-            scaleY: 0.4,
-            alpha: 0.7,
+            scaleX: 0.35,
+            scaleY: 0.35,
+            alpha: 0.5,
             duration: 380,
             ease: 'Cubic.easeIn',
             onComplete: () => {
                 heldClips.push(voiceClip);
                 const holdIndex = heldClips.length - 1;
-                const count = Math.max(1, Math.round(FIRST_HOLD_PARTICLES / (1 + Math.log(holdIndex + 1) * LOG_DECAY)));
-                spawnParticles(count);
+                const add = FIRST_HOLD_FILL / (1 + Math.log(holdIndex + 1) * LOG_DECAY);
+                const newFill = Math.min(1, fillRatio + add);
+
+                spawnSplash(add);
+
+                const holder = { v: fillRatio };
+                scene.tweens.add({
+                    targets: holder,
+                    v: newFill,
+                    duration: 520,
+                    ease: 'Cubic.easeOut',
+                    onUpdate: () => { fillRatio = holder.v; }
+                });
+
                 onAbsorbed();
             }
         });
@@ -116,12 +201,17 @@ export function createWaterBucket (scene: Scene, config: WaterBucketConfig): Wat
         holdCluster,
         getHeldClips: () => heldClips.slice(),
         destroy: () => {
-            visual.destroy();
-            for (const drop of particles)
+            scene.events.off(Phaser.Scenes.Events.UPDATE, updateHandler);
+            waterGfx.clearMask(true);
+            waterGfx.destroy();
+            bucketVisual.destroy();
+
+            for (const drop of splashDrops)
             {
                 drop.destroy();
             }
-            particles.length = 0;
+
+            splashDrops.length = 0;
         }
     };
 }
@@ -156,4 +246,3 @@ function drawBucketVisual (scene: Scene, config: WaterBucketConfig, wallThicknes
 
     return g;
 }
-
