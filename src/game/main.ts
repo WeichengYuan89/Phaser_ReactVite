@@ -32,9 +32,21 @@ const config: Phaser.Types.Core.GameConfig = {
     ]
 };
 
-const StartGame = (parent: string) => {
+/**
+ * `registry` carries what the scenes need but cannot create for themselves —
+ * above all the `StimulusPlayer`, whose AudioContext must be started inside a
+ * user gesture in React (see study/GameRoute.tsx).
+ */
+const StartGame = (parent: string, registry: Record<string, unknown> = {}) => {
 
-    return new Game({ ...config, parent });
+    const game = new Game({ ...config, parent });
+
+    for (const [key, value] of Object.entries(registry))
+    {
+        game.registry.set(key, value);
+    }
+
+    return game;
 
 }
 

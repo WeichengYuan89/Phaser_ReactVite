@@ -8,7 +8,11 @@ export interface RainTrail
     destroy: () => void;
 }
 
-export function createRainTrail (scene: Scene, target: GameObjects.GameObject & { x: number; y: number }, options?: { offsetX?: number; offsetY?: number; maxSpeed?: number; }): RainTrail
+export function createRainTrail (
+    scene: Scene,
+    target: GameObjects.GameObject & { x: number; y: number },
+    options?: { offsetX?: number; offsetY?: number; maxSpeed?: number; depth?: number; }
+): RainTrail
 {
     ensureRainParticleTexture(scene);
 
@@ -34,6 +38,13 @@ export function createRainTrail (scene: Scene, target: GameObjects.GameObject & 
         scale: { start: 0.5, end: 0 },
         blendMode: 'ADD'
     });
+
+    // The emitter is its own display-list entry, not a child of the thing it
+    // follows, so it does NOT inherit the target's depth. Left at the default 0
+    // the trail — which is most of what the drop looks like — renders behind the
+    // horizon fence and the garden, even though the drop's own sprite is in
+    // front of both.
+    emitter.setDepth(options?.depth ?? 0);
 
     emitter.startFollow(target, options?.offsetX ?? 0, options?.offsetY ?? 0);
 

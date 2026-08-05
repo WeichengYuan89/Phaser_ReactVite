@@ -1,160 +1,180 @@
 import { Scene } from 'phaser';
 
-import { startClusterVoice, stopClusterVoice } from '../audio/voiceAudio';
 import { createRainTrail, RainTrail } from '../effects/rainTrail';
 import { createWaterBucket, WaterBucket } from '../effects/waterBucket';
 import { EventBus } from '../EventBus';
-import {
-    DifficultyState,
-    PlantId,
-    pickTargetPlantByHits,
-    pickVoiceClipForTarget,
-    resolveLandingResult,
-    updateDifficultyStateByResult
-} from '../systems/gameplaySystem';
 import { createGameHud, showLandingFeedback, updateGameHud } from '../ui/gameHud';
-import { VoiceClip, VOICE_CLIPS } from '../utils/audioCatalog';
+import { createGardenView, GardenView, GARDEN_DEPTH_CEILING } from '../ui/gardenView';
+import { createFence } from '../ui/fence';
+import { TRIALS_PER_ROUND } from '../training/garden';
+import { TrainingSession, TrainingTrial } from '../training/trainingSession';
+import { DEFAULT_CONFIG, convergedRung, nextSessionStartRung } from '../training/staircase';
+import { PLANT_LABEL, PLANT_FOR_SIDE, answerForLandingX } from '../../shared/sides';
+import { PlaybackHandle, StimulusPlayer } from '../../study/StimulusPlayer';
+import { Response, TrialLog, download } from '../../study/trialLog';
+import { readCarryOver, writeCarryOver } from '../../study/sessionStore';
 
-interface PlantState
-{
-    id: PlantId;
-    x: number;
-    hits: number;
-    stageSprite?: Phaser.GameObjects.Sprite;
-    label: Phaser.GameObjects.Text;
-}
+/** Vertical travel of a drop, from spawn to the plant line. */
+const SPAWN_Y = 60;
+const LANDING_Y = 628;
+
+/**
+ * The drop is in front of the whole scene: it crosses the fence and lands among
+ * the beds, and it is the one object the participant is steering.
+ */
+const DROP_DEPTH = GARDEN_DEPTH_CEILING + 100;
+
+/** Gap between a landing and the next spawn (INTEGRATION_DESIGN §7 P2). */
+const INTER_TRIAL_MS = 1000;
+/**
+ * If a fetch somehow outruns the gap, hold the spawn rather than starting a
+ * trial in silence, and record the stall (§4.3). On localhost this should never
+ * fire.
+ */
+const MAX_STALL_MS = 5000;
 
 type ClusterPhase = 'falling' | 'held';
 
 interface ClusterState
 {
     container: Phaser.GameObjects.Container;
-    targetPlant: PlantId;
-    drops: number;
+    trial: TrainingTrial;
     fallSpeed: number;
     trail: RainTrail | null;
-    voiceClip: VoiceClip;
-    voiceSound: Phaser.Sound.BaseSound | null;
+    playback: PlaybackHandle | null;
     phase: ClusterPhase;
 }
 
 interface GameInitData
 {
-    mode?: string;
+    participantId?: string;
+    sessionId?: string;
 }
 
+/**
+ * The training activity.
+ *
+ * Structure worth knowing before editing: **all adaptive logic lives outside
+ * this scene**, in `game/training/` (pure, and covered by `npm run check`). The
+ * scene asks `TrainingSession` for a trial, renders it, and reports the outcome.
+ * Nothing here decides difficulty or which answer comes next.
+ *
+ * That separation is the P1 fix. The scene used to call
+ * `pickTargetPlantByHits()` — which returned whichever plant had fewer hits, and
+ * hits only rose on a correct answer — so the target strictly alternated
+ * left/right for as long as the player was correct, and watering the shorter
+ * plant scored well without listening to anything. Both that function and the
+ * scene's own difficulty state are gone.
+ */
 export class Game extends Scene
 {
     private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
     private keyA: Phaser.Input.Keyboard.Key;
     private keyD: Phaser.Input.Keyboard.Key;
     private keyShift: Phaser.Input.Keyboard.Key;
-    private plants: Record<PlantId, PlantState>;
-    private activeCluster: ClusterState | null;
+
+    private session: TrainingSession;
+    private player: StimulusPlayer;
+    private log: TrialLog;
+    private participantId = 'anonymous';
+
+    private garden: GardenView;
     private waterBucket: WaterBucket;
-    private clusterSpawnTimer: Phaser.Time.TimerEvent;
-    private secondTimer: Phaser.Time.TimerEvent;
-    private scoreText: Phaser.GameObjects.Text;
-    private timerText: Phaser.GameObjects.Text;
-    private hintText: Phaser.GameObjects.Text;
     private windFx: Phaser.GameObjects.Graphics;
-    private score: number;
-    private secondsLeft: number;
-    private roundOver: boolean;
-    private difficultyState: DifficultyState;
+    private trialText: Phaser.GameObjects.Text;
+    private hintText: Phaser.GameObjects.Text;
+
+    private activeCluster: ClusterState | null = null;
+    private spawnTimer: Phaser.Time.TimerEvent | null = null;
+    private roundOver = false;
+    private stalls = 0;
 
     constructor ()
     {
         super('Game');
-
-        this.plants = {} as Record<PlantId, PlantState>;
-        this.activeCluster = null;
-        this.score = 0;
-        this.secondsLeft = 120;
-        this.roundOver = false;
-        this.difficultyState = {
-            difficultyLevel: 1,
-            levelCorrectCount: 0,
-            level2WrongStreak: 0
-        };
     }
 
     create (data: GameInitData)
     {
         const { width, height } = this.scale;
 
+        this.roundOver = false;
+        this.activeCluster = null;
+        this.stalls = 0;
+
+        this.participantId = data.participantId
+            ?? (this.registry.get('participantId') as string | undefined)
+            ?? 'anonymous';
+        const sessionId = data.sessionId
+            ?? (this.registry.get('sessionId') as string | undefined)
+            ?? 'train';
+
+        // The AudioContext is created and unlocked in React, inside the click
+        // that starts the session — a browser will not let it start otherwise.
+        this.player = this.registry.get('stimulusPlayer') as StimulusPlayer;
+
+        if (!this.player)
+        {
+            // Reaching a scene without one means the game was booted outside
+            // GameRoute, so no AudioContext was unlocked in a user gesture and
+            // every trial would run in silence. Fail loudly instead.
+            throw new Error(
+                'No StimulusPlayer in the registry — start the game through study/GameRoute.tsx.'
+            );
+        }
+
+        this.log = new TrialLog({ participantId: this.participantId, sessionId, block: 'train' });
+
+        // Cross-session carry (D10-3, D11-3): resume the staircase one rung below
+        // the last convergence, and keep the garden that was already grown.
+        const carry = readCarryOver(this.participantId);
+
+        this.session = new TrainingSession({
+            config: carry
+                ? { ...DEFAULT_CONFIG, initialStep: 1, startRung: carry.startRung }
+                : DEFAULT_CONFIG,
+            garden: carry?.garden
+        });
+
         this.add.rectangle(width / 2, height / 2, width, height, 0x0f1519);
+
+        // The ground band. Its top edge is the soil/sky horizon the fence and
+        // the garden beds both sit on.
+        const horizonY = height - 86 - (172 / 2);
+
         this.add.rectangle(width / 2, height - 86, width, 172, 0x5a3f31);
+        createFence(this, width, horizonY);
 
         const hud = createGameHud(this, width);
-        this.scoreText = hud.scoreText;
-        this.timerText = hud.timerText;
+        this.trialText = hud.trialText;
         this.hintText = hud.hintText;
         this.windFx = this.add.graphics();
 
-        this.plants.lupinus = this.createPlant('lupinus', 280, 'Lupinus');
-        this.plants.mushroom = this.createPlant('mushroom', width - 280, 'Cactus');
+        this.garden = createGardenView(this, width);
+        this.garden.render(this.session.garden);
 
         this.cursors = this.input.keyboard!.createCursorKeys();
         this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
         this.keyShift = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
 
-        this.waterBucket = createWaterBucket(this, {
-            x: 110,
-            bottomY: 590,
-            width: 80,
-            height: 130
-        });
+        // A corner prop, not a feature of the play area: ~60 % of its original
+        // footprint, tucked left of the Lupinus planter (which spans x 190-370).
+        this.waterBucket = createWaterBucket(this, { x: 70, bottomY: 600, width: 50, height: 82 });
 
-        this.score = 0;
-        this.secondsLeft = 120;
-        this.roundOver = false;
-        this.difficultyState = {
-            difficultyLevel: 1,
-            levelCorrectCount: 0,
-            level2WrongStreak: 0
-        };
+        updateGameHud({ trialText: this.trialText }, 1, TRIALS_PER_ROUND);
+        this.hintText.setText('Steer each raindrop to the plant that matches the voice.');
 
-        updateGameHud({ scoreText: this.scoreText, timerText: this.timerText }, this.score, this.secondsLeft);
-        this.updatePlantVisual('lupinus');
-        this.updatePlantVisual('mushroom');
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanUp());
 
-        if (data.mode === 'time-attack')
-        {
-            this.hintText.setText('Time Attack: route each raindrop to the correct plant.');
-        }
-
-        this.clusterSpawnTimer = this.time.addEvent({
-            delay: 10000,
-            loop: true,
-            callback: () => this.trySpawnCluster()
-        });
-
-        this.secondTimer = this.time.addEvent({
-            delay: 1000,
-            loop: true,
-            callback: () => this.tickSecond()
-        });
-
-        this.trySpawnCluster();
+        this.scheduleNextTrial(0);
 
         EventBus.emit('current-scene-ready', this);
     }
 
     update (_time: number, delta: number)
     {
-        if (this.roundOver)
-        {
-            return;
-        }
-
-        if (!this.activeCluster)
-        {
-            return;
-        }
-
-        if (this.activeCluster.phase === 'held')
+        if (this.roundOver || !this.activeCluster || this.activeCluster.phase === 'held')
         {
             return;
         }
@@ -174,87 +194,117 @@ export class Game extends Scene
         if (this.activeCluster.trail && delta > 0)
         {
             const dt = delta / 1000;
-            const vx = (this.activeCluster.container.x - prevX) / dt;
-            const vy = (this.activeCluster.container.y - prevY) / dt;
-            this.activeCluster.trail.updateVelocity(vx, vy);
+            this.activeCluster.trail.updateVelocity(
+                (this.activeCluster.container.x - prevX) / dt,
+                (this.activeCluster.container.y - prevY) / dt
+            );
         }
 
-        if (this.activeCluster.container.y >= 628)
+        if (this.activeCluster.container.y >= LANDING_Y)
         {
             this.resolveClusterLanding();
         }
     }
 
-    private createPlant (id: PlantId, x: number, title: string): PlantState
+    /**
+     * Decide the next trial immediately and start fetching it, then spawn once
+     * both the inter-trial gap has elapsed and the buffer is decoded (§4.3).
+     *
+     * `nextTrial()` is idempotent until a result is recorded, so asking now to
+     * prefetch and asking again at spawn time yield the same trial.
+     */
+    private scheduleNextTrial (delayMs: number)
     {
-        this.add.rectangle(x, 650, 180, 76, 0x5a3f31);
-        this.add.rectangle(x, 622, 124, 14, 0x7c523f);
-
-        let stageSprite: Phaser.GameObjects.Sprite | undefined;
-
-        if (id === 'lupinus')
+        if (this.roundOver)
         {
-            stageSprite = this.add.sprite(x, 620, 'flowers', '8flowers by Brysiaa-0.png')
-                .setOrigin(0.5, 1)
-                .setScale(4.5);
-        }
-        else
-        {
-            stageSprite = this.add.sprite(x, 620, 'cactus', 'Cactus_Sprite_0.png')
-                .setOrigin(0.5, 1)
-                .setScale(2.05);
+            return;
         }
 
-        const label = this.add.text(x, 705, `${title}: 0/10`, {
-            fontFamily: 'Arial Black',
-            fontSize: 24,
-            color: '#ffffff'
-        }).setOrigin(0.5);
+        const trial = this.session.nextTrial();
 
-        return {
-            id,
-            x,
-            hits: 0,
-            stageSprite,
-            label
+        this.player.prefetch(trial.stimulus);
+
+        const startedWaiting = performance.now();
+
+        const attempt = () =>
+        {
+            if (this.roundOver)
+            {
+                return;
+            }
+
+            const waited = performance.now() - startedWaiting;
+
+            if (this.player.isReady(trial.stimulus) || waited >= MAX_STALL_MS)
+            {
+                if (!this.player.isReady(trial.stimulus))
+                {
+                    this.stalls += 1;
+                }
+
+                this.spawnCluster(trial);
+                return;
+            }
+
+            this.spawnTimer = this.time.delayedCall(50, attempt);
         };
+
+        this.spawnTimer = this.time.delayedCall(delayMs, attempt);
     }
 
-    private trySpawnCluster ()
+    private spawnCluster (trial: TrainingTrial)
     {
         if (this.roundOver || this.activeCluster)
         {
             return;
         }
 
-        const targetPlant = pickTargetPlantByHits(this.plants.lupinus.hits, this.plants.mushroom.hits);
-        const clip = pickVoiceClipForTarget(targetPlant, this.difficultyState.difficultyLevel, VOICE_CLIPS);
-        const drops = 3;
-        const difficultyProgress = 1 - (this.secondsLeft / 120);
-        const fallSpeed = Phaser.Math.Linear(110, 220, difficultyProgress);
+        const container = this.add.container(this.scale.width / 2, SPAWN_Y);
 
-        const cluster = this.add.container(this.scale.width / 2, 60);
-        const drop = this.add.image(0, 0, 'rain-particle');
+        container.add(this.add.image(0, 0, 'rain-particle'));
+        container.setDepth(DROP_DEPTH);
 
-        cluster.add(drop);
+        // The fall is sized by the stimulus, and never ramps (P3 / D9-4):
+        // difficulty comes from the stimulus alone, and time pressure on a motor
+        // task would confound the in-game learning curve.
+        const fallSpeed = (LANDING_Y - SPAWN_Y) / (trial.fallDurationMs / 1000);
+        // One below the drop, so the head reads on top of its own trail.
+        const trail = createRainTrail(this, container, {
+            offsetY: 14,
+            maxSpeed: 200,
+            depth: DROP_DEPTH - 1
+        });
 
-        const voiceSound = startClusterVoice(this, clip.key);
-        const trail = createRainTrail(this, cluster, { offsetY: 14, maxSpeed: 200 });
         trail.updateVelocity(0, fallSpeed);
 
-        this.activeCluster = {
-            container: cluster,
-            targetPlant,
-            drops,
+        const cluster: ClusterState = {
+            container,
+            trial,
             fallSpeed,
             trail,
-            voiceClip: clip,
-            voiceSound,
+            playback: null,
             phase: 'falling'
         };
 
-        const targetLabel = targetPlant === 'lupinus' ? 'Lupinus (M voice)' : 'Mushroom (F voice)';
-        this.hintText.setText(`L${this.difficultyState.difficultyLevel} | ${clip.difficulty}-${clip.gender} | Target: ${targetLabel}`);
+        this.activeCluster = cluster;
+
+        updateGameHud({ trialText: this.trialText }, trial.index + 1, TRIALS_PER_ROUND);
+
+        void this.player.play(trial.stimulus).then((playback) =>
+        {
+            if (this.activeCluster === cluster)
+            {
+                cluster.playback = playback;
+            }
+            else
+            {
+                playback.stop();
+            }
+        }).catch(() =>
+        {
+            // A stimulus that will not play must not silently become a trial.
+            this.hintText.setText('Audio failed to load — check the stimulus server.');
+        });
     }
 
     private moveCluster (delta: number)
@@ -270,9 +320,9 @@ export class Game extends Scene
         if (moveLeft !== moveRight)
         {
             const dx = (moveLeft ? -1 : 1) * 280 * (delta / 1000);
-            this.activeCluster.container.x = Phaser.Math.Clamp(this.activeCluster.container.x + dx, 68, this.scale.width - 68);
-
-            // drawWindFx(this.windFx, this.activeCluster.container.x, this.activeCluster.container.y, moveLeft ? -1 : 1);
+            this.activeCluster.container.x = Phaser.Math.Clamp(
+                this.activeCluster.container.x + dx, 68, this.scale.width - 68
+            );
         }
         else
         {
@@ -280,6 +330,11 @@ export class Game extends Scene
         }
     }
 
+    /**
+     * SHIFT parks the drop in the bucket — the P4 case. It used to vanish with
+     * no judgement, no record and no effect on anything. It is now logged as
+     * `aborted` and skipped by the staircase: missing data, not a wrong answer.
+     */
     private holdActiveCluster ()
     {
         if (!this.activeCluster || this.activeCluster.phase !== 'falling')
@@ -288,105 +343,125 @@ export class Game extends Scene
         }
 
         const cluster = this.activeCluster;
-        cluster.phase = 'held';
 
-        stopClusterVoice(cluster.voiceSound);
-        cluster.voiceSound = null;
+        cluster.phase = 'held';
+        cluster.playback?.stop();
+        cluster.playback = null;
         cluster.trail?.destroy();
         cluster.trail = null;
         this.windFx.clear();
 
-        this.waterBucket.holdCluster(cluster.container, cluster.voiceClip, () => {
+        this.logTrial(cluster, 'aborted', null, null);
+
+        const outcome = this.session.recordResult('aborted');
+
+        this.waterBucket.holdCluster(cluster.container, cluster.trial.stimulus, () =>
+        {
             cluster.container.destroy();
 
             if (this.activeCluster === cluster)
             {
                 this.activeCluster = null;
             }
+
+            this.afterTrial(outcome.roundOver);
         });
     }
 
     private resolveClusterLanding ()
     {
-        if (!this.activeCluster)
+        const cluster = this.activeCluster;
+
+        if (!cluster)
         {
             return;
         }
 
-        const landedX = this.activeCluster.container.x;
-        const landing = resolveLandingResult(landedX, this.scale.width, this.activeCluster.targetPlant, this.activeCluster.drops);
+        const landedX = cluster.container.x;
+        // The one geometric rule, shared with /test (D11-6). Null when the drop
+        // was never steered clear of the midline: that is a non-response, not an
+        // answer, and scoring it either way would invent data.
+        const watered = answerForLandingX(landedX, this.scale.width);
+        const answered = watered !== null;
+        const correct = watered === cluster.trial.answer;
+        const rtMs = answered && cluster.playback
+            ? performance.now() - cluster.playback.onsetMs
+            : null;
 
-        this.score += landing.delta;
+        this.logTrial(cluster, watered ?? 'timeout', rtMs, landedX);
 
-        if (landing.correct)
+        const outcome = this.session.recordResult(
+            !answered ? 'timeout' : (correct ? 'correct' : 'incorrect')
+        );
+
+        this.garden.render(this.session.garden);
+
+        if (outcome.plantCompleted)
         {
-            this.plants[landing.wateredPlant].hits = Math.min(10, this.plants[landing.wateredPlant].hits + this.activeCluster.drops);
-            this.updatePlantVisual(landing.wateredPlant);
+            this.garden.celebrate(cluster.trial.answer);
         }
 
-        const difficultyUpdate = updateDifficultyStateByResult(this.difficultyState, landing.correct);
-        this.difficultyState = difficultyUpdate.state;
+        showLandingFeedback(
+            this,
+            answered ? (correct ? 'correct' : 'incorrect') : 'no-answer',
+            PLANT_LABEL[PLANT_FOR_SIDE[cluster.trial.answer]],
+            landedX
+        );
 
-        updateGameHud({ scoreText: this.scoreText, timerText: this.timerText }, this.score, this.secondsLeft);
-        showLandingFeedback(this, landing.correct, landing.delta, landedX);
-
-        stopClusterVoice(this.activeCluster.voiceSound);
-        this.activeCluster.trail?.destroy();
-        this.activeCluster.container.destroy();
+        cluster.playback?.stop();
+        cluster.trail?.destroy();
+        cluster.container.destroy();
         this.activeCluster = null;
         this.windFx.clear();
 
-        if (difficultyUpdate.transitionMessage)
-        {
-            this.hintText.setText(difficultyUpdate.transitionMessage);
-        }
-
-        if (this.plants.lupinus.hits >= 10 && this.plants.mushroom.hits >= 10)
-        {
-            this.endRound(true);
-        }
+        this.afterTrial(outcome.roundOver);
     }
 
-    private updatePlantVisual (id: PlantId)
+    private afterTrial (roundOver: boolean)
     {
-        const plant = this.plants[id];
-        const title = id === 'lupinus' ? 'Lupinus' : 'Cactus';
-        const stageIndex = Math.min(4, Math.floor(plant.hits / 2));
-        let stage = stageIndex === 4 ? 'Adult' : `Stage ${stageIndex + 1}`;
-
-        if (plant.stageSprite)
+        if (roundOver)
         {
-            if (id === 'lupinus')
-            {
-                plant.stageSprite.setFrame(`8flowers by Brysiaa-${stageIndex}.png`);
-            }
-            else
-            {
-                plant.stageSprite.setFrame(`Cactus_Sprite_${stageIndex}.png`);
-            }
+            this.endRound();
         }
-
-        plant.label.setText(`${title} ${stage}: ${plant.hits}/10`);
+        else
+        {
+            this.scheduleNextTrial(INTER_TRIAL_MS);
+        }
     }
 
-    private tickSecond ()
+    /**
+     * One record per trial (INTEGRATION_DESIGN §8).
+     *
+     * `scoreCorrectness: true` here and only here: training cells always have a
+     * ground truth, because conflict and centre cells are excluded from the
+     * ladder (D10-4). The pre/post test passes false.
+     */
+    private logTrial (
+        cluster: ClusterState,
+        response: Response,
+        rtMs: number | null,
+        landingX: number | null
+    )
     {
-        if (this.roundOver)
-        {
-            return;
-        }
-
-        this.secondsLeft -= 1;
-        updateGameHud({ scoreText: this.scoreText, timerText: this.timerText }, this.score, this.secondsLeft);
-
-        if (this.secondsLeft <= 0)
-        {
-            const bothAdult = this.plants.lupinus.hits >= 10 && this.plants.mushroom.hits >= 10;
-            this.endRound(bothAdult);
-        }
+        this.log.add({
+            mode: 'train',
+            trialIdx: cluster.trial.index,
+            stimulus: cluster.trial.stimulus,
+            cell: cluster.trial.cell,
+            // The side actually watered, not whether it was right — `correct` is
+            // derived from the cell inside the logger.
+            response,
+            scoreCorrectness: true,
+            rtMs,
+            audioOnsetMs: cluster.playback?.onsetMs ?? 0,
+            difficultyLevel: cluster.trial.rung,
+            staircaseState: cluster.trial.staircaseState,
+            landingX,
+            fallDurationMs: cluster.trial.fallDurationMs
+        });
     }
 
-    private endRound (win: boolean)
+    private endRound ()
     {
         if (this.roundOver)
         {
@@ -394,34 +469,52 @@ export class Game extends Scene
         }
 
         this.roundOver = true;
-
-        if (this.clusterSpawnTimer)
-        {
-            this.clusterSpawnTimer.destroy();
-        }
-
-        if (this.secondTimer)
-        {
-            this.secondTimer.destroy();
-        }
+        this.spawnTimer?.destroy();
+        this.spawnTimer = null;
 
         if (this.activeCluster)
         {
-            stopClusterVoice(this.activeCluster.voiceSound);
+            this.activeCluster.playback?.stop();
             this.activeCluster.trail?.destroy();
             this.activeCluster.container.destroy();
             this.activeCluster = null;
         }
 
-        this.waterBucket?.destroy();
+        const carry = readCarryOver(this.participantId);
 
-        this.time.delayedCall(350, () => {
+        writeCarryOver(this.participantId, {
+            startRung: nextSessionStartRung(this.session.state),
+            garden: this.session.garden,
+            blocksCompleted: (carry?.blocksCompleted ?? 0) + 1
+        });
+
+        // Exported without asking. The study runs locally and a block that is
+        // not written to disk is a participant's session lost to a forgotten
+        // click; the browser download is the only durable copy.
+        const stem = this.log.fileStem();
+
+        download(`${stem}.csv`, this.log.toCsv(), 'text/csv');
+        download(`${stem}.json`, this.log.toJson(), 'application/json');
+
+        this.time.delayedCall(350, () =>
+        {
             this.scene.start('GameOver', {
-                score: this.score,
-                win,
-                lupinusHits: this.plants.lupinus.hits,
-                mushroomHits: this.plants.mushroom.hits
+                trials: this.log.length,
+                accuracy: this.session.accuracy,
+                rungReached: convergedRung(this.session.state),
+                plantsGrown: this.session.garden.man.completed + this.session.garden.woman.completed,
+                stalls: this.stalls
             });
         });
+    }
+
+    private cleanUp ()
+    {
+        this.spawnTimer?.destroy();
+        this.spawnTimer = null;
+        this.activeCluster?.playback?.stop();
+        this.activeCluster?.trail?.destroy();
+        this.waterBucket?.destroy();
+        this.garden?.destroy();
     }
 }

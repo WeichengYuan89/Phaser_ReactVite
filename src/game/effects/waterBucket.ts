@@ -1,6 +1,6 @@
 import { GameObjects, Scene } from 'phaser';
 
-import { VoiceClip } from '../utils/audioCatalog';
+import { Stimulus } from '../data/stimulusCatalog';
 
 const FIRST_HOLD_FILL = 0.28;
 const LOG_DECAY = 1.4;
@@ -18,31 +18,43 @@ export interface WaterBucketConfig
     bottomY: number;
     width: number;
     height: number;
+    /**
+     * Draw depth. Defaults to `bottomY`, because the scene sorts everything
+     * standing on the ground plane by where it touches the ground (see
+     * ui/gardenView) — the bucket is in front of the horizon fence and behind
+     * anything planted nearer the viewer.
+     */
+    depth?: number;
 }
 
 export interface WaterBucket
 {
     holdCluster: (
         cluster: GameObjects.Container,
-        voiceClip: VoiceClip,
+        stimulus: Stimulus,
         onAbsorbed: () => void
     ) => void;
-    getHeldClips: () => VoiceClip[];
+    getHeldClips: () => Stimulus[];
     destroy: () => void;
 }
 
 export function createWaterBucket (scene: Scene, config: WaterBucketConfig): WaterBucket
 {
-    const heldClips: VoiceClip[] = [];
+    const heldClips: Stimulus[] = [];
 
     const halfW = config.width / 2;
-    const wallThickness = 14;
+    // Derived, not fixed: the bucket is a small corner prop now, and a constant
+    // 14 px wall reads as clumsy once the body shrinks. At the original 80 px
+    // width this still comes out at 13, so the old proportions are preserved.
+    const wallThickness = Math.max(6, Math.round(config.width * 0.16));
     const innerLeft = config.x - halfW;
     const innerRight = config.x + halfW;
     const innerTop = config.bottomY - config.height;
     const innerBottom = config.bottomY;
 
     const bucketVisual = drawBucketVisual(scene, config, wallThickness);
+
+    bucketVisual.setDepth(config.depth ?? config.bottomY);
 
     const waterGfx = scene.add.graphics();
     waterGfx.setDepth(bucketVisual.depth + 1);
@@ -119,7 +131,8 @@ export function createWaterBucket (scene: Scene, config: WaterBucketConfig): Wat
         {
             const startX = config.x + Phaser.Math.Between(-10, 10);
             const drop = scene.add.image(startX, surfaceY - 2, SPLASH_TEXTURE);
-            drop.setDisplaySize(7, 7);
+            const dropSize = Math.max(4, Math.round(config.width * 0.09));
+            drop.setDisplaySize(dropSize, dropSize);
             drop.setTint(WATER_FILL_COLOR);
             drop.setDepth(bucketVisual.depth + 2);
 
@@ -159,7 +172,7 @@ export function createWaterBucket (scene: Scene, config: WaterBucketConfig): Wat
 
     function holdCluster (
         cluster: GameObjects.Container,
-        voiceClip: VoiceClip,
+        stimulus: Stimulus,
         onAbsorbed: () => void
     )
     {
@@ -176,7 +189,7 @@ export function createWaterBucket (scene: Scene, config: WaterBucketConfig): Wat
             duration: 380,
             ease: 'Cubic.easeIn',
             onComplete: () => {
-                heldClips.push(voiceClip);
+                heldClips.push(stimulus);
                 const holdIndex = heldClips.length - 1;
                 const add = FIRST_HOLD_FILL / (1 + Math.log(holdIndex + 1) * LOG_DECAY);
                 const newFill = Math.min(1, fillRatio + add);
