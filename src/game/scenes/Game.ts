@@ -144,6 +144,7 @@ export class Game extends Scene
 
         this.log = new TrialLog({
             participantId: this.participantId,
+            group: this.group,
             sessionId: this.sittingId,
             block: `block-${this.blocksCompletedBefore + 1}`
         });

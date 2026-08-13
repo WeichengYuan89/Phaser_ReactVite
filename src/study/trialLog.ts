@@ -13,6 +13,7 @@
  */
 
 import { Cell, Stimulus } from '../game/data/stimulusCatalog';
+import { ParticipantGroup } from './protocol';
 
 export type Mode = 'train' | 'test';
 export type Response = 'man' | 'woman' | 'aborted' | 'timeout';
@@ -21,6 +22,14 @@ export interface TrialRecord
 {
     tsIso: string;
     participantId: string;
+    /**
+     * Which arm. A column rather than a naming convention for participant ids,
+     * because D15-2 forbids pooling the CI and NH arms — they answer different
+     * questions over different spans — and an analysis that has to infer the arm
+     * from an id prefix will eventually infer it wrong.
+     */
+    group: ParticipantGroup;
+    /** The sitting, for training; `pre`/`post` for the test block. */
     sessionId: string;
     block: string;
     mode: Mode;
@@ -72,6 +81,7 @@ export interface TrialInput
 export interface SessionMeta
 {
     participantId: string;
+    group: ParticipantGroup;
     sessionId: string;
     block: string;
 }
@@ -136,6 +146,7 @@ export class TrialLog
         const record: TrialRecord = {
             tsIso: new Date().toISOString(),
             participantId: this.meta.participantId,
+            group: this.meta.group,
             sessionId: this.meta.sessionId,
             block: this.meta.block,
             mode: input.mode,
@@ -188,7 +199,7 @@ export class TrialLog
 }
 
 const COLUMNS: readonly (keyof TrialRecord)[] = [
-    'tsIso', 'participantId', 'sessionId', 'block', 'mode', 'trialIdx',
+    'tsIso', 'participantId', 'group', 'sessionId', 'block', 'mode', 'trialIdx',
     'stimulusId', 'set', 'token', 'f0TargetHz',
     'dvtlNominalSt', 'dvtlRealizedSt', 'f0n', 'vtlN', 'region',
     'difficultyLevel', 'staircaseState',

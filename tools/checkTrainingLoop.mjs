@@ -733,7 +733,7 @@ try
         let s = 4242;
         const rng = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
         const session = new TrainingSession({ rng, trialsPerRound: 60 });
-        const log = new TrialLog({ participantId: 'P01', sessionId: 'train-1', block: 'train' });
+        const log = new TrialLog({ participantId: 'P01', group: 'NH', sessionId: 'sitting-1', block: 'block-1' });
 
         while (!session.roundOver)
         {
@@ -778,7 +778,10 @@ try
 
         const header = lines[0].split(',');
         for (const column of ['stimulusId', 'response', 'correct', 'rtMs', 'difficultyLevel',
-            'staircaseState', 'landingX', 'fallDurationMs', 'vtlN', 'region'])
+            'staircaseState', 'landingX', 'fallDurationMs', 'vtlN', 'region',
+            // The arm, as a column: D15-2 forbids pooling CI and NH, and an
+            // analysis that infers the arm from an id prefix will get it wrong.
+            'group'])
         {
             assert.ok(header.includes(column), `missing column ${column}`);
         }
@@ -870,7 +873,7 @@ try
     check('a non-response is logged with correct = null, not false', () =>
     {
         const session = new TrainingSession({ rng: () => 0.5, config: { ...DEFAULT_CONFIG, warmupTrials: 0 } });
-        const log = new TrialLog({ participantId: 'P01', sessionId: 'train-1', block: 'train' });
+        const log = new TrialLog({ participantId: 'P01', group: 'NH', sessionId: 'sitting-1', block: 'block-1' });
 
         for (const response of ['timeout', 'aborted'])
         {
@@ -920,7 +923,7 @@ try
     check('an aborted trial is logged and skips the staircase', () =>
     {
         const session = new TrainingSession({ rng: () => 0.5, config: { ...DEFAULT_CONFIG, warmupTrials: 0 } });
-        const log = new TrialLog({ participantId: 'P01', sessionId: 'train-1', block: 'train' });
+        const log = new TrialLog({ participantId: 'P01', group: 'NH', sessionId: 'sitting-1', block: 'block-1' });
         const trial = session.nextTrial();
 
         log.add({
