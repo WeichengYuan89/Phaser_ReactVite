@@ -28,8 +28,9 @@ export class Preloader extends Scene
      * real training-set size that fails on its own terms: 500 files are 132 MB
      * on disk and ~265 MB once `decodeAudioData` has turned the 16-bit samples
      * into Float32, and Phaser's audio cache never evicts. `Preloader` also
-     * gates `MainMenu` on completion, so it would be a blocking wall in front of
-     * a CI-user session — to preload 500 stimuli for a session that plays ~60.
+     * gates the first playable scene on completion, so it would be a blocking
+     * wall in front of a CI-user session — preloading 500 stimuli for a block
+     * that plays 60.
      *
      * Voice audio now goes through `study/StimulusPlayer`, on raw Web Audio,
      * which gives an exact onset timestamp for RT and an explicit buffer
@@ -43,8 +44,14 @@ export class Preloader extends Scene
         this.load.image('rain-particle', 'Sprite/Particles/blue.png');
     }
 
+    /**
+     * Straight into the block. The instructions screen this used to open
+     * (`MainMenu`) is gone: the roadmap hub in React now carries both the
+     * instructions and the start button, and it has to come first anyway so
+     * the participant sees where they are before playing (D16-1).
+     */
     create ()
     {
-        this.scene.start('MainMenu');
+        this.scene.start('Game');
     }
 }

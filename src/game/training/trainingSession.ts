@@ -65,9 +65,15 @@ export interface TrainingTrial
 export interface TrainingSessionOptions
 {
     config?: StaircaseConfig;
+    /**
+     * Staircase to resume, for the second and third block of a sitting (D15-3).
+     * Omit to start a fresh track from `config` — a new sitting, or a first
+     * block ever.
+     */
+    staircase?: StaircaseState;
     rng?: () => number;
     dealer?: Dealer;
-    /** Carried over from the previous session (DECISIONS D11-3). */
+    /** Carried over from the previous block (DECISIONS D11-3, D16-3). */
     garden?: GardenState;
     trialsPerRound?: number;
 }
@@ -100,7 +106,7 @@ export class TrainingSession
 
     constructor (private readonly options: TrainingSessionOptions = {})
     {
-        this.staircase = initStaircase(options.config ?? DEFAULT_CONFIG);
+        this.staircase = options.staircase ?? initStaircase(options.config ?? DEFAULT_CONFIG);
         this.dealer = options.dealer ?? new Dealer(undefined, options.rng);
         this.gardenState = options.garden ?? initGarden();
     }

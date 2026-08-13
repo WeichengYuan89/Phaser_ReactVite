@@ -33,12 +33,12 @@ export interface StaircaseConfig
     /** Consecutive correct answers required to step up. */
     correctToStepUp: number;
     /**
-     * Rungs moved per step at the start of a session. Session 1 uses 2 to find
+     * Rungs moved per step at the start of a sitting. Sitting 1 uses 2 to find
      * the operating point quickly, dropping to 1 at the first reversal; later
-     * sessions use 1 throughout.
+     * sittings use 1 throughout.
      */
     initialStep: number;
-    /** Rung the staircase resumes at once warm-up ends (cross-session carry). */
+    /** Rung the staircase resumes at once warm-up ends (cross-sitting carry). */
     startRung: Rung;
 }
 
@@ -93,8 +93,8 @@ export function initStaircase (config: StaircaseConfig = DEFAULT_CONFIG): Stairc
  * Warm-up trials do not drive the staircase at all — they are there to confirm
  * the participant has understood the task, so neither their correct nor their
  * incorrect answers move the rung or feed the counters. The trial that ends
- * warm-up jumps to `config.startRung` (R1 for a first session, one rung below
- * the previous session's convergence otherwise).
+ * warm-up jumps to `config.startRung` (R1 for a first sitting, one rung below
+ * the previous sitting's convergence otherwise).
  */
 export function updateStaircase (
     state: StaircaseState,
@@ -159,7 +159,7 @@ export function updateStaircase (
             trialsCompleted,
             consecutiveCorrect,
             rung,
-            // Session 1 locates the operating point with a 2-rung step, then
+            // Sitting 1 locates the operating point with a 2-rung step, then
             // refines with 1 once the track has turned around for the first time.
             step: reversal ? 1 : state.step,
             lastDirection: direction ?? state.lastDirection,
@@ -172,7 +172,7 @@ export function updateStaircase (
 }
 
 /**
- * The rung the session settled at.
+ * The rung the sitting settled at.
  *
  * The mean of the reversal rungs, discarding the first — that reversal is the
  * one obtained with the coarse 2-rung step, so it sits further from the
@@ -181,7 +181,7 @@ export function updateStaircase (
  * the rung actually reached is the best available estimate.
  *
  * Note this definition is an implementation choice: TRAINING_LOOP §4 says the
- * next session starts one rung below "where the last one converged" without
+ * next sitting starts one rung below "where the last one converged" without
  * fixing an estimator.
  */
 export function convergedRung (state: StaircaseState): Rung
@@ -198,22 +198,67 @@ export function convergedRung (state: StaircaseState): Rung
     return clampRung(mean);
 }
 
-/** Cross-session carry: start one rung easier than the last convergence (floored at R1). */
-export function nextSessionStartRung (state: StaircaseState): Rung
+/** Cross-sitting carry: start one rung easier than the last convergence (floored at R1). */
+export function nextSittingStartRung (state: StaircaseState): Rung
 {
     return clampRung(convergedRung(state) - 1);
 }
 
-/** Config for session N+1, given how session N ended. */
-export function nextSessionConfig (state: StaircaseState): StaircaseConfig
+/**
+ * Config for sitting N+1, given how sitting N ended (D10-3).
+ *
+ * A *sitting* is a new appointment, typically on another day — hence the drop of
+ * one rung and the full 6-trial warm-up. Do not use this between the blocks of
+ * one sitting: see `withinSittingConfig`.
+ */
+export function nextSittingConfig (state: StaircaseState): StaircaseConfig
 {
     return {
         ...DEFAULT_CONFIG,
-        // Only session 1 uses the coarse step; later sessions refine from a
+        // Only sitting 1 uses the coarse step; later sittings refine from a
         // known operating point.
         initialStep: 1,
-        startRung: nextSessionStartRung(state)
+        startRung: nextSittingStartRung(state)
     };
+}
+
+/**
+ * Config for the next block of the *same* sitting (D15-3).
+ *
+ * No rung drop and no warm-up: the participant has not gone away and come back,
+ * they have taken a two-minute rest between blocks. Dropping a rung and
+ * re-running the errorless warm-up three times per appointment would spend a
+ * tenth of the sitting's trials re-establishing a level that was never lost —
+ * and it is what the code did before this was fixed, because it treated every
+ * block as a new session (the defect D14 identified).
+ */
+export function withinSittingConfig (state: StaircaseState): StaircaseConfig
+{
+    return {
+        ...DEFAULT_CONFIG,
+        warmupTrials: 0,
+        // Keep whatever step size the track had reached: if the first reversal
+        // has already refined it to 1, a block boundary must not coarsen it back.
+        initialStep: state.step,
+        startRung: state.rung
+    };
+}
+
+/**
+ * Resume a staircase in the next block of the same sitting.
+ *
+ * Everything that describes *where the track is* survives — rung, step size,
+ * direction and reversal history, and the current run of correct answers. Only
+ * the per-block trial counter resets, and warm-up is off.
+ *
+ * Carrying `consecutiveCorrect` is the literal reading of "continue at the
+ * current rung" (D15-3); the alternative, zeroing it, would insert a small
+ * artificial hesitation into the track at every block boundary. Recorded as an
+ * implementation choice in D16 cost (c) — D15 does not legislate this deep.
+ */
+export function resumeStaircase (state: StaircaseState): StaircaseState
+{
+    return { ...state, trialsCompleted: 0, inWarmup: false };
 }
 
 /** Compact, log-friendly snapshot for the trial record (INTEGRATION_DESIGN §8). */

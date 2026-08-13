@@ -229,3 +229,82 @@
     background: #e0917f;
     border-color: #e0917f;
 }
+
+/*
+ * Roadmap hub (PROGRESS 2.6c, DECISIONS D16-1).
+ *
+ * Participant-facing, unlike the panel above it. Still restrained: a node marks
+ * a completed block and nothing else — no accuracy, no difficulty, no colour
+ * that could read as a grade (D15-4, D16-2).
+ */
+
+.study-panel-wide {
+    width: min(680px, 92vw);
+}
+
+.roadmap {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px 4px 8px;
+}
+
+.roadmap-sitting {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.roadmap-sitting-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.roadmap-track {
+    display: flex;
+    align-items: center;
+}
+
+.roadmap-step {
+    display: flex;
+    align-items: center;
+}
+
+.roadmap-link {
+    width: 46px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.roadmap-link.is-locked {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.roadmap-node {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.3);
+    background: transparent;
+}
+
+.roadmap-node.is-done {
+    border-color: #7fb08a;
+    background: #7fb08a;
+    color: #101216;
+}
+
+/* The next block. Marked by a ring, not by a warmer colour: this is where you
+   are, not how you did. */
+.roadmap-node.is-current {
+    border-color: #d8dce3;
+    color: rgba(255, 255, 255, 0.87);
+    box-shadow: 0 0 0 4px rgba(216, 220, 227, 0.14);
+}

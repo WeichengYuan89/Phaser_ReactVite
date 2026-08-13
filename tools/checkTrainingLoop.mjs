@@ -52,6 +52,8 @@ try
             'src/game/training/dealer.ts',
             'src/study/trialLog.ts',
             'src/study/sessionStore.ts',
+            'src/study/protocol.ts',
+            'src/game/ui/gardenPlacement.ts',
             'src/shared/sides.ts',
             '--outDir', out,
             '--rootDir', 'src',
@@ -77,8 +79,11 @@ try
 
     const load = async (rel) => import(pathToFileURL(path.join(out, rel)).href);
 
-    const { initStaircase, updateStaircase, convergedRung, nextSessionStartRung, nextSessionConfig, DEFAULT_CONFIG }
-        = await load('game/training/staircase.js');
+    const {
+        initStaircase, updateStaircase, convergedRung,
+        nextSittingStartRung, nextSittingConfig, withinSittingConfig, resumeStaircase,
+        DEFAULT_CONFIG
+    } = await load('game/training/staircase.js');
     const { initCellPicker, pickCellForLevel, MAX_SAME_SIDE_RUN } = await load('game/training/cellPicker.js');
     const { Dealer } = await load('game/training/dealer.js');
     const { TrainingSession, fallDurationMs } = await load('game/training/trainingSession.js');
@@ -88,6 +93,12 @@ try
     const { otherSide, answerForLandingX, MIN_ANSWER_TRAVEL } = await load('shared/sides.js');
     const { CELLS } = await load('game/data/stimulusCatalog.js');
     const { readCarryOver, writeCarryOver, clearCarryOver } = await load('study/sessionStore.js');
+    const {
+        roadmap, totalBlocks, sittingOfBlock, blockWithinSitting, sittingId,
+        BLOCKS_PER_SITTING, SITTINGS
+    } = await load('study/protocol.js');
+    const { sowPlacement, trimPlacements, emptyPlacements, MAX_PLACEMENTS, Y_FAR, Y_NEAR, BED_HALF }
+        = await load('game/ui/gardenPlacement.js');
 
     /** Drive the staircase through a sequence of outcomes. */
     const run = (outcomes, config = DEFAULT_CONFIG) =>
@@ -193,7 +204,7 @@ try
             reversalRungs: [2, 6, 4, 6, 4]
         };
         assert.equal(convergedRung(state), 5, 'mean of [6,4,6,4] is 5');
-        assert.equal(nextSessionStartRung(state), 4, 'next session starts one rung easier');
+        assert.equal(nextSittingStartRung(state), 4, 'next sitting starts one rung easier');
     });
 
     check('a session with too few reversals falls back to the rung reached', () =>
@@ -211,7 +222,7 @@ try
             rung: 6, inWarmup: false, trialsCompleted: 60, consecutiveCorrect: 0,
             step: 1, lastDirection: 'down', reversalRungs: [3, 6, 5, 6, 5]
         };
-        const config = nextSessionConfig(state);
+        const config = nextSittingConfig(state);
         assert.equal(config.initialStep, 1);
         assert.equal(config.startRung, 5, 'mean of [6,5,6,5] = 5.5 → R6, minus one rung');
     });
@@ -450,19 +461,36 @@ try
 
     process.stdout.write('\ncross-session carry-over (PROGRESS 2.6e)\n');
 
+    /** A valid v2 record (D16). `over` patches whatever the check is about. */
+    const carryOf = (over = {}) => ({
+        group: 'NH',
+        lastSittingId: 'sitting-1',
+        staircase: initStaircase(DEFAULT_CONFIG),
+        garden: initGarden(),
+        placements: emptyPlacements(),
+        blocksCompleted: 0,
+        ...over
+    });
+
     check('progress round-trips per participant', () =>
     {
-        const carry = { startRung: 4, garden: initGarden(), blocksCompleted: 3 };
+        const carry = carryOf({ blocksCompleted: 3, lastSittingId: 'sitting-2' });
 
         writeCarryOver('P01', carry);
-        assert.deepEqual(readCarryOver('P01'), carry);
+
+        const read = readCarryOver('P01');
+
+        assert.equal(read.blocksCompleted, 3);
+        assert.equal(read.lastSittingId, 'sitting-2');
+        assert.equal(read.group, 'NH');
+        assert.deepEqual(read.staircase, carry.staircase);
         assert.equal(readCarryOver('P02'), null, 'participants must not share a record');
     });
 
     check('reset clears only the participant it names', () =>
     {
-        writeCarryOver('P01', { startRung: 4, garden: initGarden(), blocksCompleted: 3 });
-        writeCarryOver('P02', { startRung: 7, garden: initGarden(), blocksCompleted: 9 });
+        writeCarryOver('P01', carryOf({ blocksCompleted: 3 }));
+        writeCarryOver('P02', carryOf({ blocksCompleted: 9 }));
 
         clearCarryOver('P01');
 
@@ -473,19 +501,42 @@ try
 
     check('a cleared participant starts as if new', () =>
     {
-        writeCarryOver('P03', { startRung: 8, garden: initGarden(), blocksCompleted: 5 });
+        writeCarryOver('P03', carryOf({ blocksCompleted: 5 }));
         clearCarryOver('P03');
 
         // Game.create() reads null and falls back to DEFAULT_CONFIG.
         const carry = readCarryOver('P03');
         const session = new TrainingSession({
-            config: carry ? { ...DEFAULT_CONFIG, startRung: carry.startRung } : DEFAULT_CONFIG,
+            config: carry ? withinSittingConfig(carry.staircase) : DEFAULT_CONFIG,
             garden: carry?.garden,
             rng: () => 0.5
         });
 
         assert.equal(session.rung, 1, 'a cleared participant resumed mid-ladder');
         assert.equal(session.garden.man.completed, 0, 'a cleared participant kept their garden');
+    });
+
+    check('a record from an older version reads as absent, never half-migrated', () =>
+    {
+        // The v1 shape: a bare startRung, no sitting, no placements. Reading it
+        // as if it were current would resume a staircase that is not there and
+        // scatter a restored garden (D16 cost (b)).
+        window.localStorage.setItem(
+            'voice-plant:participant:P10',
+            JSON.stringify({ startRung: 4, garden: initGarden(), blocksCompleted: 3 })
+        );
+
+        assert.equal(readCarryOver('P10'), null, 'a v1 record was accepted as current');
+    });
+
+    check('a record missing its staircase is rejected, not partially trusted', () =>
+    {
+        window.localStorage.setItem(
+            'voice-plant:participant:P11',
+            JSON.stringify({ ...carryOf(), version: 2, staircase: undefined })
+        );
+
+        assert.equal(readCarryOver('P11'), null);
     });
 
     check('clearing a participant with no record is a no-op, not a crash', () =>
@@ -924,6 +975,283 @@ try
 
         assert.deepEqual(sidesFor('correct'), sidesFor('incorrect'),
             'a lopsided garden changed which stimuli were presented');
+    });
+
+    process.stdout.write('\nblock vs sitting (D15-3)\n');
+
+    /** Where a block starts, given the previous block's carry-over. */
+    const openBlock = (carry, sittingIdNow) =>
+    {
+        if (!carry)
+        {
+            return new TrainingSession({ config: DEFAULT_CONFIG, rng: () => 0.5 });
+        }
+
+        return carry.lastSittingId === sittingIdNow
+            ? new TrainingSession({
+                config: withinSittingConfig(carry.staircase),
+                staircase: resumeStaircase(carry.staircase),
+                garden: carry.garden,
+                rng: () => 0.5
+            })
+            : new TrainingSession({
+                config: nextSittingConfig(carry.staircase),
+                garden: carry.garden,
+                rng: () => 0.5
+            });
+    };
+
+    /** A staircase parked at a known rung, with reversals behind it. */
+    const trackEndingAt = (rung) =>
+    {
+        let state = initStaircase(DEFAULT_CONFIG);
+
+        for (const correct of warmup) state = updateStaircase(state, correct, DEFAULT_CONFIG).state;
+
+        // Walk up, then down, then back to the target: two reversals, so
+        // convergedRung() has something to average.
+        const outcomes = [true, true, true, false, true, true, true, false];
+
+        for (const correct of outcomes) state = updateStaircase(state, correct, DEFAULT_CONFIG).state;
+
+        return { ...state, rung };
+    };
+
+    check('a later block of the same sitting resumes the rung — no drop', () =>
+    {
+        const carry = carryOf({ lastSittingId: 'sitting-1', staircase: trackEndingAt(6) });
+        const session = openBlock(carry, 'sitting-1');
+
+        assert.equal(session.rung, 6, 'the rung was dropped inside a sitting');
+    });
+
+    check('a later block of the same sitting runs no warm-up', () =>
+    {
+        const carry = carryOf({ lastSittingId: 'sitting-1', staircase: trackEndingAt(6) });
+        const session = openBlock(carry, 'sitting-1');
+
+        assert.equal(session.state.inWarmup, false, 'warm-up re-ran inside a sitting');
+
+        // The first wrong answer must move the ladder immediately: during
+        // warm-up it would be ignored.
+        session.nextTrial();
+        const outcome = session.recordResult('incorrect');
+
+        assert.equal(outcome.rungAfter < outcome.rungBefore, true,
+            'the staircase ignored the first trial, so warm-up was still on');
+    });
+
+    check('a new sitting drops one rung and warms up again (D10-3)', () =>
+    {
+        const staircase = trackEndingAt(6);
+        const carry = carryOf({ lastSittingId: 'sitting-1', staircase });
+        const session = openBlock(carry, 'sitting-2');
+
+        assert.equal(session.state.inWarmup, true, 'a new sitting skipped its warm-up');
+        assert.equal(session.rung, 1, 'warm-up must start at R1');
+
+        // After the warm-up the track resumes one rung below convergence.
+        for (let i = 0; i < DEFAULT_CONFIG.warmupTrials; i += 1)
+        {
+            session.nextTrial();
+            session.recordResult('correct');
+        }
+
+        assert.equal(session.rung, nextSittingStartRung(staircase),
+            'a new sitting did not resume one rung below convergence');
+    });
+
+    check('resuming inside a sitting keeps the refined step size', () =>
+    {
+        // Once the first reversal has narrowed the step to 1, a block boundary
+        // must not coarsen it back to 2 — that would re-open the search for an
+        // operating point the sitting has already found.
+        const staircase = { ...trackEndingAt(5), step: 1 };
+        const carry = carryOf({ lastSittingId: 'sitting-1', staircase });
+
+        assert.equal(withinSittingConfig(carry.staircase).initialStep, 1);
+        assert.equal(resumeStaircase(carry.staircase).step, 1);
+    });
+
+    check('the garden carries across a block boundary either way', () =>
+    {
+        const garden = { man: { completed: 4, active: { stage: 1, progress: 1 } },
+            woman: { completed: 2, active: { stage: 0, progress: 0 } } };
+        const carry = carryOf({ lastSittingId: 'sitting-1', staircase: trackEndingAt(5), garden });
+
+        assert.equal(openBlock(carry, 'sitting-1').garden.man.completed, 4);
+        assert.equal(openBlock(carry, 'sitting-2').garden.man.completed, 4);
+    });
+
+    process.stdout.write('\nroadmap (D15-4, D16)\n');
+
+    check('path length is the participant protocol, not a fixed number', () =>
+    {
+        assert.equal(totalBlocks('CI'), SITTINGS.CI * BLOCKS_PER_SITTING);
+        assert.equal(totalBlocks('NH'), SITTINGS.NH * BLOCKS_PER_SITTING);
+        assert.equal(roadmap('CI', 0).length, totalBlocks('CI'));
+        assert.equal(roadmap('NH', 0).length, totalBlocks('NH'));
+        // The point of node = block (D15-4 rationale (f)): a CI participant who
+        // attends once still lights most of their path.
+        assert.equal(roadmap('CI', BLOCKS_PER_SITTING).filter((n) => n.state === 'done').length,
+            totalBlocks('CI'), 'one CI sitting should complete the CI path');
+    });
+
+    check('exactly one node is current, and it is the next block', () =>
+    {
+        const nodes = roadmap('NH', 4);
+
+        assert.equal(nodes.filter((n) => n.state === 'current').length, 1);
+        assert.equal(nodes.findIndex((n) => n.state === 'current'), 4);
+        assert.equal(nodes.filter((n) => n.state === 'done').length, 4);
+    });
+
+    check('a completed protocol leaves no current node and never overflows', () =>
+    {
+        const nodes = roadmap('CI', 99);
+
+        assert.equal(nodes.length, totalBlocks('CI'), 'extra blocks lengthened the path');
+        assert.equal(nodes.every((n) => n.state === 'done'), true);
+    });
+
+    check('nodes light on blocks completed, never on accuracy (D16-2)', () =>
+    {
+        // The whole reason this display exists next to the garden: a participant
+        // who is struggling advances the path exactly as fast as one who is not,
+        // because a block is 60 trials either way (D11-1).
+        const perfect = new TrainingSession({ rng: () => 0.5 });
+        const struggling = new TrainingSession({ rng: () => 0.5 });
+
+        for (let i = 0; i < TRIALS_PER_ROUND; i += 1)
+        {
+            perfect.nextTrial();
+            perfect.recordResult('correct');
+            struggling.nextTrial();
+            struggling.recordResult('incorrect');
+        }
+
+        assert.equal(perfect.roundOver, true);
+        assert.equal(struggling.roundOver, true);
+        assert.equal(perfect.trialsPresented, struggling.trialsPresented,
+            'blocks of different accuracy ran to different lengths');
+        assert.equal(perfect.accuracy === struggling.accuracy, false,
+            'the two runs were meant to differ in accuracy');
+
+        // Both finished a block, so both advance the path by exactly one node.
+        const lit = (n) => roadmap('NH', n).filter((node) => node.state === 'done').length;
+
+        assert.equal(lit(1) - lit(0), 1);
+    });
+
+    check('sitting arithmetic groups blocks the way the roadmap draws them', () =>
+    {
+        for (let block = 0; block < totalBlocks('NH'); block += 1)
+        {
+            const sitting = sittingOfBlock(block);
+            assert.equal(sitting, Math.floor(block / BLOCKS_PER_SITTING) + 1);
+            assert.equal(blockWithinSitting(block) >= 1, true);
+            assert.equal(blockWithinSitting(block) <= BLOCKS_PER_SITTING, true);
+            assert.equal(roadmap('NH', 0)[block].sitting, sitting);
+        }
+
+        assert.equal(sittingId(2), 'sitting-2');
+    });
+
+    check('roadmap state never reaches stimulus selection (P1 regression)', () =>
+    {
+        // Same rng, same rung, wildly different protocol progress: the trials
+        // must be identical. The roadmap is a display, and the P1 defect was
+        // exactly a display-derived quantity steering selection (D9-5).
+        const idsAfter = (blocksCompleted) =>
+        {
+            let s = 11;
+            const rng = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
+            const carry = carryOf({
+                blocksCompleted,
+                lastSittingId: 'sitting-1',
+                staircase: trackEndingAt(5)
+            });
+            const session = new TrainingSession({
+                config: withinSittingConfig(carry.staircase),
+                staircase: resumeStaircase(carry.staircase),
+                garden: carry.garden,
+                rng
+            });
+            const ids = [];
+
+            for (let i = 0; i < 30; i += 1)
+            {
+                ids.push(session.nextTrial().stimulus.id);
+                session.recordResult('correct');
+            }
+
+            return ids;
+        };
+
+        assert.deepEqual(idsAfter(0), idsAfter(8), 'protocol progress changed the stimuli presented');
+    });
+
+    process.stdout.write('\ngarden placement persistence (D16-3)\n');
+
+    check('a sown plant lands inside its own bed', () =>
+    {
+        let s = 3;
+        const rng = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
+
+        for (let i = 0; i < 500; i += 1)
+        {
+            const placement = sowPlacement('lupinus', 280, rng);
+
+            assert.equal(placement.y >= Y_FAR && placement.y <= Y_NEAR, true, 'plant left the depth band');
+            assert.equal(Math.abs(placement.x - 280) <= BED_HALF, true, 'plant left the bed sideways');
+            // D11-6: the beds must not blur where "left" ends.
+            assert.equal(placement.x < 512, true, 'a left-side plant crossed the midline');
+        }
+    });
+
+    check('placements survive a write/read round trip unchanged', () =>
+    {
+        const placements = {
+            man: [sowPlacement('lupinus', 280), sowPlacement('lupinus', 280)],
+            woman: [sowPlacement('cactus', 744)]
+        };
+
+        writeCarryOver('P20', carryOf({ placements, blocksCompleted: 2 }));
+
+        const read = readCarryOver('P20');
+
+        assert.deepEqual(read.placements, placements,
+            'a restored garden would be re-scattered — the defect D16-3 fixes');
+    });
+
+    check('stored placements are bounded by what the view can draw', () =>
+    {
+        const many = Array.from({ length: 40 }, () => sowPlacement('cactus', 744));
+
+        writeCarryOver('P21', carryOf({ placements: { man: [], woman: many } }));
+
+        const read = readCarryOver('P21');
+
+        assert.equal(read.placements.woman.length, MAX_PLACEMENTS);
+        // Trimming keeps the newest, so the last entry is still the plant that
+        // was growing — the view reads the list from its end.
+        assert.deepEqual(read.placements.woman[MAX_PLACEMENTS - 1], many[many.length - 1]);
+    });
+
+    check('a corrupt placement list degrades to an empty bed, not a crash', () =>
+    {
+        window.localStorage.setItem(
+            'voice-plant:participant:P22',
+            JSON.stringify({
+                ...carryOf(),
+                version: 2,
+                placements: { man: [{ x: 'left' }], woman: null }
+            })
+        );
+
+        const read = readCarryOver('P22');
+
+        assert.deepEqual(read.placements, { man: [], woman: [] });
     });
 }
 finally

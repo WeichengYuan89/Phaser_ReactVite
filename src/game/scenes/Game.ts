@@ -8,11 +8,18 @@ import { createGardenView, GardenView, GARDEN_DEPTH_CEILING } from '../ui/garden
 import { createFence } from '../ui/fence';
 import { TRIALS_PER_ROUND } from '../training/garden';
 import { TrainingSession, TrainingTrial } from '../training/trainingSession';
-import { DEFAULT_CONFIG, convergedRung, nextSessionStartRung } from '../training/staircase';
+import {
+    DEFAULT_CONFIG,
+    convergedRung,
+    nextSittingConfig,
+    resumeStaircase,
+    withinSittingConfig
+} from '../training/staircase';
 import { PLANT_LABEL, PLANT_FOR_SIDE, answerForLandingX } from '../../shared/sides';
 import { PlaybackHandle, StimulusPlayer } from '../../study/StimulusPlayer';
 import { Response, TrialLog, download } from '../../study/trialLog';
 import { readCarryOver, writeCarryOver } from '../../study/sessionStore';
+import { ParticipantGroup, isGroup } from '../../study/protocol';
 
 /** Vertical travel of a drop, from spawn to the plant line. */
 const SPAWN_Y = 60;
@@ -49,6 +56,7 @@ interface GameInitData
 {
     participantId?: string;
     sessionId?: string;
+    group?: ParticipantGroup;
 }
 
 /**
@@ -77,6 +85,9 @@ export class Game extends Scene
     private player: StimulusPlayer;
     private log: TrialLog;
     private participantId = 'anonymous';
+    private sittingId = 'sitting-1';
+    private group: ParticipantGroup = 'NH';
+    private blocksCompletedBefore = 0;
 
     private garden: GardenView;
     private waterBucket: WaterBucket;
@@ -105,9 +116,13 @@ export class Game extends Scene
         this.participantId = data.participantId
             ?? (this.registry.get('participantId') as string | undefined)
             ?? 'anonymous';
-        const sessionId = data.sessionId
+        this.sittingId = data.sessionId
             ?? (this.registry.get('sessionId') as string | undefined)
-            ?? 'train';
+            ?? 'sitting-1';
+
+        const group = data.group ?? this.registry.get('group');
+
+        this.group = isGroup(group) ? group : 'NH';
 
         // The AudioContext is created and unlocked in React, inside the click
         // that starts the session — a browser will not let it start otherwise.
@@ -123,18 +138,41 @@ export class Game extends Scene
             );
         }
 
-        this.log = new TrialLog({ participantId: this.participantId, sessionId, block: 'train' });
-
-        // Cross-session carry (D10-3, D11-3): resume the staircase one rung below
-        // the last convergence, and keep the garden that was already grown.
         const carry = readCarryOver(this.participantId);
 
-        this.session = new TrainingSession({
-            config: carry
-                ? { ...DEFAULT_CONFIG, initialStep: 1, startRung: carry.startRung }
-                : DEFAULT_CONFIG,
-            garden: carry?.garden
+        this.blocksCompletedBefore = carry?.blocksCompleted ?? 0;
+
+        this.log = new TrialLog({
+            participantId: this.participantId,
+            sessionId: this.sittingId,
+            block: `block-${this.blocksCompletedBefore + 1}`
         });
+
+        /**
+         * Where the staircase picks up — three cases, and the middle one is the
+         * defect D14 found and D15-3 settled. Every block used to take the
+         * cross-sitting path: drop a rung, re-run the 6-trial warm-up. In a
+         * 3-block sitting that spent 18 trials, a tenth of the appointment,
+         * re-learning a level the participant had not left, and walked the rung
+         * down three times in one hour.
+         *
+         *   no record          → fresh track, R1 warm-up, coarse step
+         *   same sitting       → resume exactly, no drop, no warm-up
+         *   a later sitting    → one rung below convergence, warm-up, fine step
+         */
+        const sameSitting = carry !== null && carry.lastSittingId === this.sittingId;
+
+        this.session = new TrainingSession(
+            carry === null
+                ? { config: DEFAULT_CONFIG }
+                : (sameSitting
+                    ? {
+                        config: withinSittingConfig(carry.staircase),
+                        staircase: resumeStaircase(carry.staircase),
+                        garden: carry.garden
+                    }
+                    : { config: nextSittingConfig(carry.staircase), garden: carry.garden })
+        );
 
         this.add.rectangle(width / 2, height / 2, width, height, 0x0f1519);
 
@@ -150,7 +188,9 @@ export class Game extends Scene
         this.hintText = hud.hintText;
         this.windFx = this.add.graphics();
 
-        this.garden = createGardenView(this, width);
+        // Restored positions, not fresh random ones (D16-3): the plants a
+        // participant grew last block must stand where they stood.
+        this.garden = createGardenView(this, width, carry?.placements);
         this.garden.render(this.session.garden);
 
         this.cursors = this.input.keyboard!.createCursorKeys();
@@ -480,12 +520,19 @@ export class Game extends Scene
             this.activeCluster = null;
         }
 
-        const carry = readCarryOver(this.participantId);
+        const blocksCompleted = this.blocksCompletedBefore + 1;
 
+        // The whole track is stored, not a summary of it: what happens next
+        // depends on whether the next block opens a new sitting, and that is not
+        // known here (D15-3). `blocksCompleted` is also the roadmap's only
+        // input — it advances on completion, never on performance (D16-2).
         writeCarryOver(this.participantId, {
-            startRung: nextSessionStartRung(this.session.state),
+            group: this.group,
+            lastSittingId: this.sittingId,
+            staircase: this.session.state,
             garden: this.session.garden,
-            blocksCompleted: (carry?.blocksCompleted ?? 0) + 1
+            placements: this.garden.placements(),
+            blocksCompleted
         });
 
         // Exported without asking. The study runs locally and a block that is
@@ -503,7 +550,9 @@ export class Game extends Scene
                 accuracy: this.session.accuracy,
                 rungReached: convergedRung(this.session.state),
                 plantsGrown: this.session.garden.man.completed + this.session.garden.woman.completed,
-                stalls: this.stalls
+                stalls: this.stalls,
+                group: this.group,
+                blocksCompleted
             });
         });
     }
