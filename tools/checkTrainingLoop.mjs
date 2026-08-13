@@ -97,8 +97,11 @@ try
         roadmap, totalBlocks, sittingOfBlock, blockWithinSitting, sittingId,
         BLOCKS_PER_SITTING, SITTINGS
     } = await load('study/protocol.js');
-    const { sowPlacement, trimPlacements, emptyPlacements, MAX_PLACEMENTS, Y_FAR, Y_NEAR, BED_HALF }
-        = await load('game/ui/gardenPlacement.js');
+    const {
+        sowPlacement, sowPlacementAvoiding, placementForOrdinal, restoreOffset,
+        trimPlacements, emptyPlacements, MAX_PLACEMENTS, MIN_PLANT_GAP_X,
+        Y_FAR, Y_NEAR, BED_HALF
+    } = await load('game/ui/gardenPlacement.js');
 
     /** Drive the staircase through a sequence of outcomes. */
     const run = (outcomes, config = DEFAULT_CONFIG) =>
@@ -1239,6 +1242,84 @@ try
         // Trimming keeps the newest, so the last entry is still the plant that
         // was growing — the view reads the list from its end.
         assert.deepEqual(read.placements.woman[MAX_PLACEMENTS - 1], many[many.length - 1]);
+    });
+
+    check('a restored garden sows new plants somewhere new, not on the last stored spot', () =>
+    {
+        // The 2026-08-13 playtest defect. The alignment used to be recomputed on
+        // every sowing, so once the restored plants were placed every further
+        // plant resolved to the last stored entry — the coordinates of the plant
+        // already on screen — and a restored garden grew one stack.
+        const stored = Array.from({ length: 3 }, () => sowPlacement('lupinus', 280));
+        const plantsAtRestore = stored.length;
+        const offset = restoreOffset(plantsAtRestore, stored.length);
+
+        // Restore: every existing plant gets its own coordinates back, in order.
+        for (let ordinal = 0; ordinal < plantsAtRestore; ordinal += 1)
+        {
+            assert.deepEqual(placementForOrdinal(ordinal, offset, stored), stored[ordinal]);
+        }
+
+        // Everything sown afterwards must fall off the end of the list.
+        for (let ordinal = plantsAtRestore; ordinal < plantsAtRestore + 6; ordinal += 1)
+        {
+            assert.equal(placementForOrdinal(ordinal, offset, stored), undefined,
+                `plant ${ordinal} re-used a stored placement — the stacking defect`);
+        }
+    });
+
+    check('a trimmed placement list still lines up with the plant that was growing', () =>
+    {
+        // After trimming, the stored list is shorter than the plant history, so
+        // it aligns with the newest plants and its last entry is the active one.
+        const stored = Array.from({ length: 4 }, () => sowPlacement('cactus', 744));
+        const plantsAtRestore = 10;
+        const offset = restoreOffset(plantsAtRestore, stored.length);
+
+        assert.equal(placementForOrdinal(plantsAtRestore - 1, offset, stored), stored[3],
+            'the active plant did not get the last stored placement');
+        assert.equal(placementForOrdinal(plantsAtRestore - 4, offset, stored), stored[0]);
+        assert.equal(placementForOrdinal(plantsAtRestore - 5, offset, stored), undefined,
+            'a plant older than the stored window should be sown fresh');
+        assert.equal(placementForOrdinal(plantsAtRestore, offset, stored), undefined);
+    });
+
+    check('a new plant keeps clear of the ones already in its bed', () =>
+    {
+        // Uniform sampling put 41 % of consecutive plants within one plant-width
+        // of each other (measured 2026-08-13); this is the fix for that.
+        let crowded = 0;
+        const trials = 2000;
+
+        for (let i = 0; i < trials; i += 1)
+        {
+            const first = sowPlacement('lupinus', 280);
+            const second = sowPlacementAvoiding('lupinus', 280, [first]);
+
+            if (Math.abs(second.x - first.x) < MIN_PLANT_GAP_X)
+            {
+                crowded += 1;
+            }
+        }
+
+        assert.ok(crowded / trials < 0.02,
+            `${(100 * crowded / trials).toFixed(1)} % of plants still landed on top of a neighbour`);
+    });
+
+    check('a full bed still yields a placement instead of failing', () =>
+    {
+        // Twelve plants at 44 px clearance need 528 px; the bed is 280 px wide,
+        // so the constraint must degrade rather than loop or throw.
+        const existing = [];
+
+        for (let i = 0; i < MAX_PLACEMENTS; i += 1)
+        {
+            const placement = sowPlacementAvoiding('lupinus', 280, existing);
+
+            assert.equal(Number.isFinite(placement.x), true);
+            assert.equal(Math.abs(placement.x - 280) <= BED_HALF, true, 'crowding pushed a plant out of its bed');
+            existing.push(placement);
+        }
     });
 
     check('a corrupt placement list degrades to an empty bed, not a crash', () =>

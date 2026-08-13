@@ -11,7 +11,9 @@ import {
     Y_FAR,
     Y_NEAR,
     emptyPlacements,
-    sowPlacement
+    placementForOrdinal,
+    restoreOffset,
+    sowPlacementAvoiding
 } from './gardenPlacement';
 
 /**
@@ -36,6 +38,10 @@ import {
  * through `placements()`. Re-randomising a restored garden was a defect, not a
  * detail: the garden keeps accumulating across blocks, and continuity is the
  * thing that accumulation is for.
+ *
+ * **New plants keep out of each other's way (2026-08-13).** Uniform sampling in
+ * the bed put two in five consecutive plants within one plant-width of each
+ * other; `sowPlacementAvoiding` takes the roomiest of several candidates.
  *
  * **The bed never crosses the midline.** The response geometry is a plain
  * left/right split (`answerForLandingX`), shared with the pre/post test, so no
@@ -64,6 +70,12 @@ interface SideView
     plants: Plant[];
     /** Plants sown on this side over the participant's whole history. */
     sownTotal: number;
+    /**
+     * Alignment of the restored placement list against plant ordinals, fixed at
+     * the first render and never recomputed — recomputing it is what made every
+     * plant after a restore land on the previous one's spot.
+     */
+    restoredOffset: number | null;
     overflow: GameObjects.Text;
     label: GameObjects.Text;
 }
@@ -93,12 +105,17 @@ export function createGardenView (
      *
      * Driven by the count rather than by growth events, so a garden restored
      * from a previous block lands in exactly the state one grown live would.
-     * Restored placements are read from the end — the stored list always ends
-     * with the plant that was growing — and any not covered are sown fresh.
+     * Plants the restored list covers get their old coordinates back; anything
+     * beyond it is sown fresh, keeping clear of what is already in the bed.
      */
     function syncPlants (view: SideView, state: SideState, stored: readonly Placement[])
     {
         const required = state.completed + 1;
+
+        if (view.restoredOffset === null)
+        {
+            view.restoredOffset = restoreOffset(required, stored.length);
+        }
 
         while (view.sownTotal < required)
         {
@@ -112,9 +129,12 @@ export function createGardenView (
                 previous.sprite.setDepth(previous.placement.y);
             }
 
-            const fromEnd = required - view.sownTotal - 1;
-            const placement = stored[stored.length - 1 - fromEnd]
-                ?? sowPlacement(view.plant, view.anchorX);
+            const placement = placementForOrdinal(view.sownTotal, view.restoredOffset, stored)
+                ?? sowPlacementAvoiding(
+                    view.plant,
+                    view.anchorX,
+                    view.plants.map((plant) => plant.placement)
+                );
 
             view.plants.push(addPlant(scene, view.plant, placement));
             view.sownTotal += 1;
@@ -238,6 +258,7 @@ function makeSide (scene: Scene, plant: PlantId, anchorX: number): SideView
         anchorX,
         plants: [],
         sownTotal: 0,
+        restoredOffset: null,
         overflow,
         label
     };

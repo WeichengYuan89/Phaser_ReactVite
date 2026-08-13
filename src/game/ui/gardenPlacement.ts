@@ -119,6 +119,118 @@ export function trimPlacements (placements: readonly Placement[]): Placement[]
     return placements.slice(Math.max(0, placements.length - MAX_PLACEMENTS));
 }
 
+/**
+ * Horizontal clearance a new plant tries to keep from the ones already in its
+ * bed, in canvas pixels.
+ *
+ * Sized from the sprites: a fully grown Lupinus renders 58 px wide and a Cactus
+ * 78 px, so anything under ~40 px of stem separation reads as one clump rather
+ * than two plants. Uniform sampling alone put 41 % of consecutive plants inside
+ * that distance (measured, 2026-08-13).
+ *
+ * Only x is considered. The bed is 54 px deep and the sprites are up to 68 px
+ * tall, so depth can never separate two plants on its own — front-to-back
+ * overlap is intended (it is what D13's perspective bed is for), coincident
+ * stems are not.
+ */
+export const MIN_PLANT_GAP_X = 44;
+
+/**
+ * Candidates tried before settling for the roomiest one found.
+ *
+ * Chosen by measurement, not taste. At the realistic bed occupancy — about five
+ * plants per side after a block — 12 attempts leave a worst-case neighbour gap
+ * of 15 px and 24 leave 22 px, while 48 and 96 buy almost nothing. Sowing
+ * happens a handful of times per block, so the cost is not worth counting.
+ *
+ * Past roughly eight plants no attempt budget helps: twelve plants at
+ * `MIN_PLANT_GAP_X` need 528 px and the bed is 280 px wide, so a third of
+ * neighbour pairs end up under 20 px apart however hard this tries. If a full
+ * bed ever reads as a clump in a pilot, the fix is a smaller `MAX_RENDERED`, not
+ * more sampling.
+ */
+const SOW_ATTEMPTS = 24;
+
+function clearance (candidate: Placement, existing: readonly Placement[]): number
+{
+    let smallest = Infinity;
+
+    for (const plant of existing)
+    {
+        smallest = Math.min(smallest, Math.abs(plant.x - candidate.x));
+    }
+
+    return smallest;
+}
+
+/**
+ * Sow a plant that keeps clear of the ones already in the bed.
+ *
+ * Rejection sampling rather than a hard constraint, and deliberately so: a bed
+ * is 280 px wide and may hold twelve plants, so at some point there is no gap
+ * left to find. Taking the roomiest of a handful of candidates degrades into
+ * "as spread out as this bed still allows" instead of failing or looping.
+ */
+export function sowPlacementAvoiding (
+    plant: PlantId,
+    anchorX: number,
+    existing: readonly Placement[],
+    rng: () => number = Math.random
+): Placement
+{
+    let best = sowPlacement(plant, anchorX, rng);
+    let bestClearance = clearance(best, existing);
+
+    for (let attempt = 1; attempt < SOW_ATTEMPTS && bestClearance < MIN_PLANT_GAP_X; attempt += 1)
+    {
+        const candidate = sowPlacement(plant, anchorX, rng);
+        const candidateClearance = clearance(candidate, existing);
+
+        if (candidateClearance > bestClearance)
+        {
+            best = candidate;
+            bestClearance = candidateClearance;
+        }
+    }
+
+    return best;
+}
+
+/**
+ * How far the stored list is shifted against plant ordinals.
+ *
+ * The stored list always ends with the plant that was growing when the block
+ * ended, so it aligns with the *end* of the plants that exist at restore time.
+ * Fixing that alignment once is the whole point — see `placementForOrdinal`.
+ */
+export function restoreOffset (plantsAtRestore: number, storedLength: number): number
+{
+    return plantsAtRestore - storedLength;
+}
+
+/**
+ * The stored placement belonging to plant `ordinal`, or undefined if the plant
+ * is new and needs sowing.
+ *
+ * **This is where a real defect lived (fixed 2026-08-13).** The alignment used
+ * to be recomputed on every sowing from the *current* plant count, so once the
+ * restored plants were all placed, every further plant resolved to the last
+ * stored entry — the coordinates of the plant already on screen. Restored
+ * gardens therefore grew a single stack: `p0 p1 p2 p2 p2 p2`. Computing the
+ * offset once, at restore, makes later ordinals fall off the end of the list
+ * and get a fresh spot, which is what they should always have had.
+ */
+export function placementForOrdinal (
+    ordinal: number,
+    offset: number,
+    stored: readonly Placement[]
+): Placement | undefined
+{
+    const index = ordinal - offset;
+
+    return index >= 0 && index < stored.length ? stored[index] : undefined;
+}
+
 /** Shape check for a placement list restored from storage. */
 export function isPlacementList (value: unknown): value is Placement[]
 {
