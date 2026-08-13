@@ -18,7 +18,7 @@ import { useRef, useState } from 'react';
 import { PhaserGame } from '../PhaserGame';
 import { SessionSetup } from './SessionSetup';
 import { StimulusPlayer } from './StimulusPlayer';
-import { ParticipantIdentity, readCarryOver, readIdentity, writeIdentity } from './sessionStore';
+import { ParticipantIdentity, writeIdentity } from './sessionStore';
 import { TRIALS_PER_ROUND } from '../game/training/garden';
 
 export function GameRoute ()
@@ -61,9 +61,6 @@ export function GameRoute ()
 
     if (!identity)
     {
-        const remembered = readIdentity();
-        const carried = remembered ? readCarryOver(remembered.participantId) : null;
-
         return (
             <SessionSetup
                 title="Voice Plant — training"
@@ -71,11 +68,8 @@ export function GameRoute ()
                     + 'Each raindrop carries a voice — steer it to the plant that matches.'}
                 startLabel="Start training"
                 sessions={['train-1', 'train-2', 'train-3', 'train-4', 'train-5']}
+                showProgress
                 onStart={start}
-                footnote={carried
-                    ? `Previous progress found: ${carried.blocksCompleted} block(s) completed, `
-                        + `resuming at level ${carried.startRung}.`
-                    : undefined}
             />
         );
     }

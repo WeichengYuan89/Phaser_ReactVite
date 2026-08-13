@@ -168,3 +168,64 @@
     font-size: 0.95rem;
     color: rgba(255, 255, 255, 0.45);
 }
+
+/*
+ * Progress readout and reset (PROGRESS 2.6e).
+ *
+ * Experimenter-facing, not participant-facing: it sits below the start button
+ * and is styled down, so it reads as an instrument panel rather than as part of
+ * the task. Only the training route asks for it.
+ */
+
+.study-progress-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.study-progress-panel .study-note {
+    font-size: 0.85rem;
+}
+
+.study-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.study-confirm-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.study-quiet,
+.study-danger {
+    align-self: flex-start;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.study-quiet:hover {
+    color: rgba(255, 255, 255, 0.87);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.study-danger {
+    color: #e0917f;
+    border-color: #7f4536;
+}
+
+.study-danger:hover {
+    color: #101216;
+    background: #e0917f;
+    border-color: #e0917f;
+}

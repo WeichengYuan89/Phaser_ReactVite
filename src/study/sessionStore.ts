@@ -76,11 +76,6 @@ export function writeIdentity (identity: ParticipantIdentity): void
     storage()?.setItem(IDENTITY_KEY, JSON.stringify(identity));
 }
 
-export function clearIdentity (): void
-{
-    storage()?.removeItem(IDENTITY_KEY);
-}
-
 export function readCarryOver (participantId: string): CarryOver | null
 {
     return safeParse<CarryOver>(storage()?.getItem(KEY_PREFIX + participantId) ?? null);
@@ -89,4 +84,22 @@ export function readCarryOver (participantId: string): CarryOver | null
 export function writeCarryOver (participantId: string, carry: CarryOver): void
 {
     storage()?.setItem(KEY_PREFIX + participantId, JSON.stringify(carry));
+}
+
+/**
+ * Discard one participant's accumulated progress — staircase rung, garden and
+ * block count — so their next block starts from scratch.
+ *
+ * Needed mainly for piloting: without it, repeated test runs under one id keep
+ * inheriting (by design, D10-3 / D11-3), and there is no way to see a first
+ * session again. Deliberately scoped to one participant, and deliberately does
+ * **not** touch the remembered identity — during testing you want the id field
+ * to stay filled in.
+ *
+ * Exported trial logs are files and are unaffected; nothing here is a record of
+ * what a participant did.
+ */
+export function clearCarryOver (participantId: string): void
+{
+    storage()?.removeItem(KEY_PREFIX + participantId);
 }

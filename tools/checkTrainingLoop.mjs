@@ -51,6 +51,7 @@ try
             'src/game/training/cellPicker.ts',
             'src/game/training/dealer.ts',
             'src/study/trialLog.ts',
+            'src/study/sessionStore.ts',
             'src/shared/sides.ts',
             '--outDir', out,
             '--rootDir', 'src',
@@ -62,6 +63,17 @@ try
         ],
         { cwd: ROOT, stdio: 'inherit' }
     );
+
+    // sessionStore reaches for window.localStorage; give it one before the
+    // module is imported.
+    const store = new Map();
+    globalThis.window = {
+        localStorage: {
+            getItem: (k) => (store.has(k) ? store.get(k) : null),
+            setItem: (k, v) => store.set(k, String(v)),
+            removeItem: (k) => store.delete(k)
+        }
+    };
 
     const load = async (rel) => import(pathToFileURL(path.join(out, rel)).href);
 
@@ -75,6 +87,7 @@ try
     const { TrialLog, toCsv } = await load('study/trialLog.js');
     const { otherSide, answerForLandingX, MIN_ANSWER_TRAVEL } = await load('shared/sides.js');
     const { CELLS } = await load('game/data/stimulusCatalog.js');
+    const { readCarryOver, writeCarryOver, clearCarryOver } = await load('study/sessionStore.js');
 
     /** Drive the staircase through a sequence of outcomes. */
     const run = (outcomes, config = DEFAULT_CONFIG) =>
@@ -433,6 +446,58 @@ try
     {
         assert.equal(fallDurationMs({ durationS: 0.5 }), 4500);
         assert.equal(fallDurationMs({ durationS: 3.67 }), 4670);
+    });
+
+    process.stdout.write('\ncross-session carry-over (PROGRESS 2.6e)\n');
+
+    check('progress round-trips per participant', () =>
+    {
+        const carry = { startRung: 4, garden: initGarden(), blocksCompleted: 3 };
+
+        writeCarryOver('P01', carry);
+        assert.deepEqual(readCarryOver('P01'), carry);
+        assert.equal(readCarryOver('P02'), null, 'participants must not share a record');
+    });
+
+    check('reset clears only the participant it names', () =>
+    {
+        writeCarryOver('P01', { startRung: 4, garden: initGarden(), blocksCompleted: 3 });
+        writeCarryOver('P02', { startRung: 7, garden: initGarden(), blocksCompleted: 9 });
+
+        clearCarryOver('P01');
+
+        assert.equal(readCarryOver('P01'), null, 'the named record survived the reset');
+        // The real hazard: wiping a participant who was merely nearby.
+        assert.equal(readCarryOver('P02')?.blocksCompleted, 9, 'reset hit the wrong participant');
+    });
+
+    check('a cleared participant starts as if new', () =>
+    {
+        writeCarryOver('P03', { startRung: 8, garden: initGarden(), blocksCompleted: 5 });
+        clearCarryOver('P03');
+
+        // Game.create() reads null and falls back to DEFAULT_CONFIG.
+        const carry = readCarryOver('P03');
+        const session = new TrainingSession({
+            config: carry ? { ...DEFAULT_CONFIG, startRung: carry.startRung } : DEFAULT_CONFIG,
+            garden: carry?.garden,
+            rng: () => 0.5
+        });
+
+        assert.equal(session.rung, 1, 'a cleared participant resumed mid-ladder');
+        assert.equal(session.garden.man.completed, 0, 'a cleared participant kept their garden');
+    });
+
+    check('clearing a participant with no record is a no-op, not a crash', () =>
+    {
+        clearCarryOver('never-seen');
+        assert.equal(readCarryOver('never-seen'), null);
+    });
+
+    check('a corrupt record does not take the session down', () =>
+    {
+        window.localStorage.setItem('voice-plant:participant:P09', '{not json');
+        assert.equal(readCarryOver('P09'), null, 'corrupt storage should read as absent');
     });
 
     process.stdout.write('\ngarden and round termination (D11)\n');
