@@ -1,9 +1,9 @@
 // GENERATED FILE — do not edit by hand.
 //
-// Source:      stimuli/manifest_validated.csv (sha256:da4dfa95746530ed, 600 rows)
+// Source:      ../stimuli/manifest_validated.csv (sha256:da4dfa95746530ed, 600 rows)
 // Generator:   tools/build_catalog.py
-// Regenerate:  python3 tools/build_catalog.py
-// Spec:        drafts/02-integration/INTEGRATION_DESIGN.md §5 (DECISIONS D9-3)
+// Regenerate:  npm run catalog
+// Spec:        ../drafts/02-integration/INTEGRATION_DESIGN.md §5 (DECISIONS D9-3)
 //
 // The manifest is the single source of truth for every acoustic value here; the
 // audio itself is never hand-edited (CLAUDE.md). This file is data only —
