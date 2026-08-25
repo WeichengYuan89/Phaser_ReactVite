@@ -1,7 +1,5 @@
 import { Scene } from 'phaser';
 
-import { VOICE_CLIPS } from '../utils/audioCatalog';
-
 export class Preloader extends Scene
 {
     constructor ()
@@ -22,20 +20,38 @@ export class Preloader extends Scene
         });
     }
 
+    /**
+     * Sprites only — voice stimuli are deliberately absent (INTEGRATION_DESIGN
+     * §4.1/§4.3, DECISIONS D9-2).
+     *
+     * This used to loop `this.load.audio(...)` over the whole clip list. At the
+     * real training-set size that fails on its own terms: 500 files are 132 MB
+     * on disk and ~265 MB once `decodeAudioData` has turned the 16-bit samples
+     * into Float32, and Phaser's audio cache never evicts. `Preloader` also
+     * gates the first playable scene on completion, so it would be a blocking
+     * wall in front of a CI-user session — preloading 500 stimuli for a block
+     * that plays 60.
+     *
+     * Voice audio now goes through `study/StimulusPlayer`, on raw Web Audio,
+     * which gives an exact onset timestamp for RT and an explicit buffer
+     * lifetime.
+     */
     preload ()
     {
         this.load.setPath('assets');
         this.load.multiatlas('flowers', 'Sprite/Flower/flowersheet.json', 'assets/Sprite/Flower/');
         this.load.multiatlas('cactus', 'Sprite/cactus/cactussheet.json', 'assets/Sprite/cactus/');
-
-        for (const clip of VOICE_CLIPS)
-        {
-            this.load.audio(clip.key, `Audio/${clip.file}`);
-        }
+        this.load.image('rain-particle', 'Sprite/Particles/blue.png');
     }
 
+    /**
+     * Straight into the block. The instructions screen this used to open
+     * (`MainMenu`) is gone: the roadmap hub in React now carries both the
+     * instructions and the start button, and it has to come first anyway so
+     * the participant sees where they are before playing (D16-1).
+     */
     create ()
     {
-        this.scene.start('MainMenu');
+        this.scene.start('Game');
     }
 }

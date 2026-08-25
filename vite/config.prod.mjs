@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+import { stimuli } from './stimuliPlugin.mjs';
+
 const phasermsg = () => {
     return {
         name: 'phasermsg',
@@ -21,7 +23,8 @@ export default defineConfig({
     base: './',
     plugins: [
         react(),
-        phasermsg()
+        phasermsg(),
+        stimuli()
     ],
     logLevel: 'warning',
     build: {

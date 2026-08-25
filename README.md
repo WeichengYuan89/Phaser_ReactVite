@@ -18,6 +18,8 @@ This template has been updated for:
 ## Requirements
 
 [Node.js](https://nodejs.org) is required to install dependencies and run scripts via `npm`.
+Python 3.9+ (standard library only) is required only when regenerating or checking
+the runtime stimulus catalog against `../stimuli/manifest_validated.csv`.
 
 ## Available Commands
 
@@ -28,6 +30,9 @@ This template has been updated for:
 | `npm run build` | Create a production build in the `dist` folder |
 | `npm run dev-nolog` | Launch a development web server without sending anonymous data (see "About log.js" below) |
 | `npm run build-nolog` | Create a production build in the `dist` folder without sending anonymous data (see "About log.js" below) |
+| `npm run check` | Run the behavioural assertions for the training and study logic |
+| `npm run catalog` | Regenerate `src/game/data/stimulusCatalog.ts` from the validated manifest |
+| `npm run catalog:check` | Verify that the committed runtime catalog matches the validated manifest without writing files |
 
 ## Writing Code
 

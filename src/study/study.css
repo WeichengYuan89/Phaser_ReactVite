@@ -1,0 +1,310 @@
+/*
+ * Pre/post test styling.
+ *
+ * Deliberately plain and low-arousal: this route is a measurement instrument,
+ * not part of the game. Nothing here may signal correctness — no colour change
+ * on response, no success/failure states.
+ */
+
+.study {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    background: #101216;
+    color: rgba(255, 255, 255, 0.87);
+    user-select: none;
+}
+
+.study-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: min(560px, 86vw);
+    padding: 36px 40px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    background: #16191f;
+}
+
+.study-panel h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.study-note {
+    margin: 0;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 0.95rem;
+}
+
+.study-error {
+    color: #e0917f;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+    word-break: break-word;
+}
+
+.study-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.study-field input,
+.study-field select {
+    padding: 10px 12px;
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.87);
+    background: #101216;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 6px;
+}
+
+.study-primary {
+    padding: 12px 20px;
+    font-size: 1rem;
+    color: #101216;
+    background: #d8dce3;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.study-primary:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.study-progress {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+
+.study-progress > div {
+    height: 100%;
+    background: rgba(255, 255, 255, 0.62);
+    transition: width 80ms linear;
+}
+
+.study-counter {
+    position: fixed;
+    top: 24px;
+    font-size: 0.85rem;
+    letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* Fixed height so the layout never shifts between fixation and playback. */
+.study-stage {
+    height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.study-listening {
+    font-size: 2.6rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.study-options {
+    display: flex;
+    gap: 96px;
+    align-items: flex-end;
+}
+
+.study-options.is-disabled {
+    opacity: 0.28;
+}
+
+.study-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 28px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.study-option:disabled {
+    cursor: default;
+}
+
+.study-option:not(:disabled):hover {
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.study-sprite {
+    display: block;
+}
+
+.study-option-label {
+    font-size: 1.1rem;
+}
+
+.study-option-key {
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.study-hint {
+    min-height: 1.4em;
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/*
+ * Progress readout and reset (PROGRESS 2.6e).
+ *
+ * Experimenter-facing, not participant-facing: it sits below the start button
+ * and is styled down, so it reads as an instrument panel rather than as part of
+ * the task. Only the training route asks for it.
+ */
+
+.study-progress-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.study-progress-panel .study-note {
+    font-size: 0.85rem;
+}
+
+.study-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.study-confirm-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.study-quiet,
+.study-danger {
+    align-self: flex-start;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.study-quiet:hover {
+    color: rgba(255, 255, 255, 0.87);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.study-danger {
+    color: #e0917f;
+    border-color: #7f4536;
+}
+
+.study-danger:hover {
+    color: #101216;
+    background: #e0917f;
+    border-color: #e0917f;
+}
+
+/*
+ * Roadmap hub (PROGRESS 2.6c, DECISIONS D16-1).
+ *
+ * Participant-facing, unlike the panel above it. Still restrained: a node marks
+ * a completed block and nothing else — no accuracy, no difficulty, no colour
+ * that could read as a grade (D15-4, D16-2).
+ */
+
+.study-panel-wide {
+    width: min(680px, 92vw);
+}
+
+.roadmap {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px 4px 8px;
+}
+
+.roadmap-sitting {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.roadmap-sitting-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.roadmap-track {
+    display: flex;
+    align-items: center;
+}
+
+.roadmap-step {
+    display: flex;
+    align-items: center;
+}
+
+.roadmap-link {
+    width: 46px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.roadmap-link.is-locked {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.roadmap-node {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.3);
+    background: transparent;
+}
+
+.roadmap-node.is-done {
+    border-color: #7fb08a;
+    background: #7fb08a;
+    color: #101216;
+}
+
+/* The next block. Marked by a ring, not by a warmer colour: this is where you
+   are, not how you did. */
+.roadmap-node.is-current {
+    border-color: #d8dce3;
+    color: rgba(255, 255, 255, 0.87);
+    box-shadow: 0 0 0 4px rgba(216, 220, 227, 0.14);
+}

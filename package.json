@@ -24,7 +24,10 @@
         "dev": "node log.js dev & vite --config vite/config.dev.mjs",
         "build": "node log.js build & vite build --config vite/config.prod.mjs",
         "dev-nolog": "vite --config vite/config.dev.mjs",
-        "build-nolog": "vite build --config vite/config.prod.mjs"
+        "build-nolog": "vite build --config vite/config.prod.mjs",
+        "check": "node tools/checkTrainingLoop.mjs",
+        "catalog": "python3 tools/build_catalog.py",
+        "catalog:check": "python3 tools/build_catalog.py --check"
     },
     "dependencies": {
         "phaser": "^3.90.0",

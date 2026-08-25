@@ -8,46 +8,45 @@ export interface RainTrail
     destroy: () => void;
 }
 
-export function createRainTrail (scene: Scene, target: GameObjects.GameObject & { x: number; y: number }, options?: { offsetX?: number; offsetY?: number; maxSpeed?: number; }): RainTrail
+export function createRainTrail (
+    scene: Scene,
+    target: GameObjects.GameObject & { x: number; y: number },
+    options?: { offsetX?: number; offsetY?: number; maxSpeed?: number; depth?: number; }
+): RainTrail
 {
     ensureRainParticleTexture(scene);
 
-    const maxSpeed = options?.maxSpeed ?? 420;
+    const maxSpeed = options?.maxSpeed ?? 300;
     let velocityX = 0;
     let velocityY = 0;
 
     const getSpeed = () => Math.sqrt((velocityX * velocityX) + (velocityY * velocityY));
-    const getSpeedPercent = () => Phaser.Math.Clamp(Phaser.Math.Percent(getSpeed(), 0, maxSpeed), 0, 1);
-    const getAngle = () =>
-    {
-        if (velocityX === 0 && velocityY === 0)
-        {
-            return 90;
-        }
 
-        return Phaser.Math.RadToDeg(Math.atan2(velocityY, velocityX)) + 180;
-    };
-
+    // Mirrors Phaser's "scene config" example: each emission point is a small
+    // 360° puff (speed > 0) rather than a single static dot. Successive puffs
+    // overlap in space, so ADD-blending smooths the corners on sharp turns and
+    // particles keep drifting outward after emission, giving the "floating then
+    // fading" feel of the reference.
     const emitter = scene.add.particles(0, 0, RAIN_PARTICLE_TEXTURE, {
-        frequency: 45,
-        quantity: 1,
-        speed: {
-            onEmit: () => Phaser.Math.Linear(30, 160, getSpeedPercent())
-        },
+        speed: 50,
         lifespan: {
-            onEmit: () => Phaser.Math.Linear(140, 520, getSpeedPercent())
+            onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed) * 7000
         },
         alpha: {
-            onEmit: () => Phaser.Math.Linear(0.12, 0.45, getSpeedPercent())
+            onEmit: () => Phaser.Math.Percent(getSpeed(), 0, maxSpeed)
         },
-        scale: { start: 4, end: 1 },
-        angle: {
-            onEmit: () => getAngle()
-        },
+        scale: { start: 0.5, end: 0 },
         blendMode: 'ADD'
     });
 
-    emitter.startFollow(target, options?.offsetX ?? 0, options?.offsetY ?? 16);
+    // The emitter is its own display-list entry, not a child of the thing it
+    // follows, so it does NOT inherit the target's depth. Left at the default 0
+    // the trail — which is most of what the drop looks like — renders behind the
+    // horizon fence and the garden, even though the drop's own sprite is in
+    // front of both.
+    emitter.setDepth(options?.depth ?? 0);
+
+    emitter.startFollow(target, options?.offsetX ?? 0, options?.offsetY ?? 0);
 
     return {
         updateVelocity: (vx: number, vy: number) => {
@@ -68,9 +67,19 @@ function ensureRainParticleTexture (scene: Scene)
         return;
     }
 
+    // Soft glowing blue blob: concentric circles with decreasing alpha for a
+    // gradient-like falloff under ADD blending.
+    const size = 10;
+    const center = size / 2;
     const gfx = scene.make.graphics({ x: 0, y: 0 }, false);
-    gfx.fillStyle(0x7dd3fc, 1);
-    gfx.fillCircle(4, 4, 4);
-    gfx.generateTexture(RAIN_PARTICLE_TEXTURE, 8, 8);
+    gfx.fillStyle(0x38bdf8, 0.18);
+    gfx.fillCircle(center, center, center);
+    gfx.fillStyle(0x7dd3fc, 0.35);
+    gfx.fillCircle(center, center, center * 0.7);
+    gfx.fillStyle(0xbae6fd, 0.6);
+    gfx.fillCircle(center, center, center * 0.4);
+    gfx.fillStyle(0xe0f2fe, 1);
+    gfx.fillCircle(center, center, center * 0.2);
+    gfx.generateTexture(RAIN_PARTICLE_TEXTURE, size, size);
     gfx.destroy();
 }
