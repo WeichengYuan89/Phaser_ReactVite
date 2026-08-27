@@ -38,8 +38,11 @@ const IDENTITY_KEY = 'voice-plant:current';
  *
  * v2 (2026-08-13, D16): staircase state replaces the bare `startRung`; adds
  * sitting identity, participant group and garden placements.
+ * v3 (2026-08-26, D19): stimulus inventory changes from legacy v1 R1–R8 to the
+ * declared v1_plus_r9 R1–R9 composite. Old carry-over must not silently resume
+ * inside a block using the new ladder.
  */
-const RECORD_VERSION = 2;
+const RECORD_VERSION = 3;
 
 export interface ParticipantIdentity
 {

@@ -2,7 +2,7 @@
  * Trial-level logging — INTEGRATION_DESIGN §8, TRAINING_LOOP §6 (PROGRESS 2.3).
  *
  * One record per trial, for both activities. `stimulusId` keys back to
- * `stimuli/manifest_validated.csv`, so the Phase 3 analysis joins on it and
+ * the declared version's `manifest_validated.csv`, so Phase 3 analysis joins on it and
  * needs nothing else from the runtime.
  *
  * The single rule that matters here: **`correct` is null wherever no ground
@@ -17,6 +17,7 @@ import { ParticipantGroup } from './protocol';
 
 export type Mode = 'train' | 'test';
 export type Response = 'man' | 'woman' | 'aborted' | 'timeout';
+export type StaircaseEvent = 'up' | 'down' | 'cap_stall';
 
 export interface TrialRecord
 {
@@ -35,6 +36,8 @@ export interface TrialRecord
     mode: Mode;
     trialIdx: number;
 
+    /** Declared composite inventory; never inferred from a filename (D19). */
+    stimulusVersion: string;
     stimulusId: string;
     set: string;
     token: string;
@@ -47,8 +50,14 @@ export interface TrialRecord
 
     /** Train only: the rung this trial was drawn from. */
     difficultyLevel: number | null;
+    /** Train only: the rung after this outcome was applied. */
+    difficultyLevelAfter: number | null;
     /** Train only: an opaque snapshot of the staircase, for reconstruction. */
     staircaseState: string | null;
+    /** Actual movement, or the explicit D19 blocked-upward event at R9. */
+    staircaseEvent: StaircaseEvent | null;
+    /** Train only; cap_stall is always false here. */
+    staircaseReversal: boolean | null;
 
     response: Response;
     /** null wherever the grid defines no correct answer — never false. */
@@ -73,7 +82,10 @@ export interface TrialInput
     /** Omit for the test block, where correctness is never scored. */
     scoreCorrectness?: boolean;
     difficultyLevel?: number | null;
+    difficultyLevelAfter?: number | null;
     staircaseState?: string | null;
+    staircaseEvent?: StaircaseEvent | null;
+    staircaseReversal?: boolean | null;
     landingX?: number | null;
     fallDurationMs?: number | null;
 }
@@ -152,6 +164,7 @@ export class TrialLog
             mode: input.mode,
             trialIdx: input.trialIdx,
 
+            stimulusVersion: stimulus.stimulusVersion,
             stimulusId: stimulus.id,
             set: stimulus.set,
             token: stimulus.token,
@@ -163,7 +176,10 @@ export class TrialLog
             region: cell.region,
 
             difficultyLevel: input.difficultyLevel ?? null,
+            difficultyLevelAfter: input.difficultyLevelAfter ?? null,
             staircaseState: input.staircaseState ?? null,
+            staircaseEvent: input.staircaseEvent ?? null,
+            staircaseReversal: input.staircaseReversal ?? null,
 
             response: input.response,
             correct: correctnessOf(cell, input.response, input.scoreCorrectness ?? false),
@@ -200,9 +216,10 @@ export class TrialLog
 
 const COLUMNS: readonly (keyof TrialRecord)[] = [
     'tsIso', 'participantId', 'group', 'sessionId', 'block', 'mode', 'trialIdx',
-    'stimulusId', 'set', 'token', 'f0TargetHz',
+    'stimulusVersion', 'stimulusId', 'set', 'token', 'f0TargetHz',
     'dvtlNominalSt', 'dvtlRealizedSt', 'f0n', 'vtlN', 'region',
-    'difficultyLevel', 'staircaseState',
+    'difficultyLevel', 'difficultyLevelAfter', 'staircaseState',
+    'staircaseEvent', 'staircaseReversal',
     'response', 'correct', 'rtMs', 'audioOnsetMs',
     'landingX', 'fallDurationMs'
 ];

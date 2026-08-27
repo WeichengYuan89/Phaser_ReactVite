@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the game's stimulus catalog from the validated manifest.
 
-    ../stimuli/manifest_validated.csv  ──►  src/game/data/stimulusCatalog.ts
+    ../stimuli/v1_plus_r9/manifest_validated.csv  ──►  src/game/data/stimulusCatalog.ts
 
 The CSV stays the single source of truth (CLAUDE.md "Where things live"); the
 generated TypeScript is committed so the app builds without Python present.
@@ -32,11 +32,19 @@ from statistics import fmean
 
 GAME_ROOT = Path(__file__).resolve().parent.parent
 THESIS_ROOT = GAME_ROOT.parent
-MANIFEST = THESIS_ROOT / "stimuli" / "manifest_validated.csv"
+STIMULI_ROOT = THESIS_ROOT / "stimuli"
+MANIFEST = STIMULI_ROOT / "v1_plus_r9" / "manifest_validated.csv"
 OUT = GAME_ROOT / "src" / "game" / "data" / "stimulusCatalog.ts"
 
-# --- grid invariants (STIMULUS_DESIGN §2, DECISIONS D2) ----------------------
-N_CELLS = 25
+# --- composite invariants (STIMULUS_DESIGN §7, DECISIONS D19) ----------------
+STIMULUS_VERSION = "v1_plus_r9"
+N_MANIFEST_ROWS = 664
+N_PLAYABLE_STIMULI = 640
+N_TRAIN_STIMULI = 540
+N_TEST_STIMULI = 100
+N_CONTROLS = 24
+N_CELLS = 27
+N_ASSESSMENT_CELLS = 25
 N_TRAIN_PER_CELL = 20  # 20 carrier sentences (D5)
 N_TEST_PER_CELL = 4  # 4 CVC words (D4)
 
@@ -46,7 +54,7 @@ CELL_TAG = re.compile(r"(f\d+_v[a-z]*\d+)$")
 # Fuller (2014) CI weights, as adopted by DECISIONS D10 / TRAINING_LOOP §3.
 BETA_F0, BETA_VTL = 6.88, 0.59
 VTL_NORM_ST = 3.6  # ΔVTL → vtl_n (DECISIONS D2 / D6)
-# The ladder as published in TRAINING_LOOP.md §3, easiest (R1) → hardest (R8).
+# The ladder as published in TRAINING_LOOP.md §3, easiest (R1) → hardest (R9).
 # If regenerated stimuli reorder this, the doc and difficulty.ts must be revised
 # together — hence a hard failure rather than a warning.
 EXPECTED_LADDER = [
@@ -58,6 +66,7 @@ EXPECTED_LADDER = [
     ("f131_v00", "f185_v00"),
     ("f156_vp28", "f156_vm28"),
     ("f156_vp14", "f156_vm14"),
+    ("r09_man", "r09_woman"),
 ]
 
 
@@ -91,29 +100,80 @@ def read_manifest(path: Path) -> tuple[list[dict], str]:
     return rows, digest
 
 
-def build(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+def cell_id_for(row: dict) -> str:
+    """Legacy cells keep their filename tag; the non-grid R9 pair is explicit."""
+    rung = row.get("rung", "").strip()
+    answer = row.get("answer", "").strip()
+
+    if rung in {"9", "9.0"}:
+        require(answer in {"man", "woman"}, f"R9 row has invalid answer: {row['stimulus_id']}")
+        return f"r09_{answer}"
+
+    tag = CELL_TAG.search(row["stimulus_id"])
+    require(tag is not None, f"cannot parse a cell tag from {row['stimulus_id']}")
+    return tag.group(1)
+
+
+def runtime_path(row: dict, manifest: Path) -> str:
+    """Resolve a composite-relative path, then express it under /stimuli/."""
+    resolved = (manifest.parent / row["rel_path"]).resolve()
+
+    try:
+        relative = resolved.relative_to(STIMULI_ROOT.resolve())
+    except ValueError as error:
+        raise CheckFailed(f"asset escapes the stimuli root: {row['rel_path']}") from error
+
+    require(resolved.is_file(), f"asset does not exist: {row['rel_path']}")
+    return relative.as_posix()
+
+
+def build(rows: list[dict], manifest: Path) -> tuple[list[dict], list[dict]]:
     stimuli: list[dict] = []
     by_cell: dict[str, dict] = {}
     realized: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
+    require(len(rows) == N_MANIFEST_ROWS, f"expected {N_MANIFEST_ROWS} manifest rows, found {len(rows)}")
+    set_counts = defaultdict(int)
+    origin_counts = defaultdict(int)
+
     for row in rows:
+        set_counts[row["set"]] += 1
+        origin_counts[row["asset_origin"]] += 1
         flags = row["flags"].strip()
         require(not flags, f"{row['stimulus_id']} carries validation flags: {flags}")
+        require(
+            row["stimulus_version"] == STIMULUS_VERSION,
+            f"{row['stimulus_id']} has version {row['stimulus_version']!r}, expected {STIMULUS_VERSION!r}",
+        )
 
-        tag = CELL_TAG.search(row["stimulus_id"])
-        require(tag is not None, f"cannot parse a cell tag from {row['stimulus_id']}")
-        cell_id = tag.group(1)
+        # Identity controls belong to the composite provenance inventory, not to
+        # either runtime activity. They are intentionally absent from STIMULI.
+        if row["set"] == "control":
+            require(row["asset_origin"] == "legacy_v1", "a control is not from frozen legacy v1")
+            runtime_path(row, manifest)  # still require the referenced WAV to resolve
+            continue
+
+        require(row["set"] in {"train", "test"}, f"unknown set {row['set']!r}")
+        require(row["asset_origin"] in {"legacy_v1", "v1_plus_r9"}, "unknown asset origin")
+
+        cell_id = cell_id_for(row)
 
         f0_n = float(row["f0_n"])
         vtl_n = float(row["vtl_n"])
+        derived_answer = answer_for(f0_n, vtl_n)
+        explicit_answer = row.get("answer", "").strip() or None
+        require(
+            explicit_answer is None or explicit_answer == derived_answer,
+            f"{row['stimulus_id']} answer disagrees with its cue signs",
+        )
         cell = {
             "id": cell_id,
-            "f0TargetHz": int(row["F0_target_Hz"]),
+            "f0TargetHz": float(row["F0_target_Hz"]),
             "dvtlNominalSt": float(row["dVTL_st"]),
             "f0n": f0_n,
             "vtlNominalN": vtl_n,
             "region": row["region"],
-            "answer": answer_for(f0_n, vtl_n),
+            "answer": derived_answer,
         }
         known = by_cell.setdefault(cell_id, cell)
         require(known == cell, f"cell {cell_id} has inconsistent grid values across rows")
@@ -122,20 +182,33 @@ def build(rows: list[dict]) -> tuple[list[dict], list[dict]]:
         stimuli.append(
             {
                 "id": row["stimulus_id"],
-                "path": row["rel_path"],
+                "path": runtime_path(row, manifest),
                 "set": row["set"],
                 "token": row["token"],
                 "cellId": cell_id,
+                "stimulusVersion": row["stimulus_version"],
+                "assetOrigin": row["asset_origin"],
                 "durationS": round(float(row["duration_s"]), 3),
                 "f0RealizedHz": round(float(row["F0_realized_Hz"]), 2),
                 "dvtlRealizedSt": round(float(row["dVTL_realized_st"]), 3),
             }
         )
 
+    require(
+        dict(set_counts) == {"train": N_TRAIN_STIMULI, "test": N_TEST_STIMULI, "control": N_CONTROLS},
+        f"wrong composite set counts: {dict(set_counts)}",
+    )
+    require(
+        dict(origin_counts) == {"legacy_v1": 624, "v1_plus_r9": 40},
+        f"wrong asset-origin counts: {dict(origin_counts)}",
+    )
+    require(len(stimuli) == N_PLAYABLE_STIMULI, f"expected {N_PLAYABLE_STIMULI} playable stimuli")
+
     for cell_id, cell in by_cell.items():
+        is_r9 = cell_id in {"r09_man", "r09_woman"}
         for name, key, expected in (
             ("Train", "train", N_TRAIN_PER_CELL),
-            ("Test", "test", N_TEST_PER_CELL),
+            ("Test", "test", 0 if is_r9 else N_TEST_PER_CELL),
         ):
             values = realized[cell_id][key]
             require(
@@ -143,9 +216,17 @@ def build(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                 f"cell {cell_id} has {len(values)} {key} stimuli, expected {expected}",
             )
             cell[f"n{name}"] = len(values)
-            cell[f"dvtlRealizedSt{name}"] = round(fmean(values), 3)
+            cell[f"dvtlRealizedSt{name}"] = round(fmean(values), 3) if values else None
 
     require(len(by_cell) == N_CELLS, f"expected {N_CELLS} cells, found {len(by_cell)}")
+    require(
+        sum(cell["nTest"] > 0 for cell in by_cell.values()) == N_ASSESSMENT_CELLS,
+        f"expected {N_ASSESSMENT_CELLS} assessment cells",
+    )
+    require(
+        sum(cell["nTrain"] > 0 for cell in by_cell.values()) == N_CELLS,
+        f"expected all {N_CELLS} cells to have training stimuli",
+    )
 
     # Grid order: F0 descending (woman-most first), ΔVTL ascending — the reading
     # order of fig_A, so the generated table can be eyeballed against the figure.
@@ -159,12 +240,12 @@ def build(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 def derive_ladder(cells: list[dict]) -> list[tuple[tuple[str, str], float]]:
     """Re-derive the D10 ladder as a cross-check on difficulty.ts.
 
-    Trainable cells = 25 − 8 conflict − 1 centre = 16, paired by mirror symmetry
+    Trainable cells = legacy 16 + the D19 R9 pair = 18, paired by mirror symmetry
     (f0_n, vtl_n) ↔ (−f0_n, −vtl_n); a rung's difficulty is the mean |E| of its
     two cells; rungs sort by descending E (large E = strong evidence = easy).
     """
     trainable = [c for c in cells if c["answer"] is not None]
-    require(len(trainable) == 16, f"expected 16 trainable cells, found {len(trainable)}")
+    require(len(trainable) == 18, f"expected 18 trainable cells, found {len(trainable)}")
 
     def evidence(cell: dict) -> float:
         vtl_n = cell["dvtlRealizedStTrain"] / VTL_NORM_ST
@@ -184,7 +265,7 @@ def derive_ladder(cells: list[dict]) -> list[tuple[tuple[str, str], float]]:
         man, woman = sorted([cell, mirror], key=lambda c: c["answer"] != "man")
         rungs[(man["id"], woman["id"])] = (abs(evidence(man)) + abs(evidence(woman))) / 2
 
-    require(len(rungs) == 8, f"expected 8 rungs, found {len(rungs)}")
+    require(len(rungs) == 9, f"expected 9 rungs, found {len(rungs)}")
     ordered = sorted(rungs.items(), key=lambda kv: -kv[1])
     derived = [pair for pair, _ in ordered]
     require(
@@ -201,9 +282,11 @@ def ts_string(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def render(stimuli: list[dict], cells: list[dict], digest: str) -> str:
-    def num(value: float) -> str:
-        return f"{value + 0.0:g}"  # + 0.0 normalises -0.0 away
+def render(stimuli: list[dict], cells: list[dict], digest: str, source_rows: int) -> str:
+    def num(value: float | None) -> str:
+        if value is None:
+            return "null"
+        return f"{value + 0.0:.10g}"  # + 0.0 normalises -0.0 away; keeps R9 targets exact
 
     cell_lines = []
     for c in cells:
@@ -211,7 +294,7 @@ def render(stimuli: list[dict], cells: list[dict], digest: str) -> str:
         cell_lines.append(
             "    { "
             f"id: {ts_string(c['id'])}, "
-            f"f0TargetHz: {c['f0TargetHz']}, "
+            f"f0TargetHz: {num(c['f0TargetHz'])}, "
             f"dvtlNominalSt: {num(c['dvtlNominalSt'])}, "
             f"f0n: {num(c['f0n'])}, "
             f"vtlNominalN: {num(c['vtlNominalN'])}, "
@@ -233,6 +316,8 @@ def render(stimuli: list[dict], cells: list[dict], digest: str) -> str:
             f"set: {ts_string(s['set'])}, "
             f"token: {ts_string(s['token'])}, "
             f"cellId: {ts_string(s['cellId'])}, "
+            f"stimulusVersion: {ts_string(s['stimulusVersion'])}, "
+            f"assetOrigin: {ts_string(s['assetOrigin'])}, "
             f"durationS: {num(s['durationS'])}, "
             f"f0RealizedHz: {num(s['f0RealizedHz'])}, "
             f"dvtlRealizedSt: {num(s['dvtlRealizedSt'])} "
@@ -255,7 +340,7 @@ def render(stimuli: list[dict], cells: list[dict], digest: str) -> str:
 
     return f"""// GENERATED FILE — do not edit by hand.
 //
-// Source:      ../stimuli/manifest_validated.csv (sha256:{digest}, {len(stimuli)} rows)
+// Source:      ../stimuli/v1_plus_r9/manifest_validated.csv (sha256:{digest}, {source_rows} rows; {len(stimuli)} playable)
 // Generator:   tools/build_catalog.py
 // Regenerate:  npm run catalog
 // Spec:        ../drafts/02-integration/INTEGRATION_DESIGN.md §5 (DECISIONS D9-3)
@@ -264,17 +349,20 @@ def render(stimuli: list[dict], cells: list[dict], digest: str) -> str:
 // audio itself is never hand-edited (CLAUDE.md). This file is data only —
 // difficulty ordering is policy and lives in ./difficulty.ts (DECISIONS D10).
 
+export const STIMULUS_VERSION = {ts_string(STIMULUS_VERSION)} as const;
+export type StimulusVersion = typeof STIMULUS_VERSION;
 export type StimulusSet = 'train' | 'test';
+export type AssetOrigin = 'legacy_v1' | 'v1_plus_r9';
 export type Region = {region_union};
 
 /** 'man' | 'woman', or null where the grid defines no ground truth. */
 export type Answer = 'man' | 'woman' | null;
 
-/** A grid cell, e.g. 'f110_vp28' — the F0 target and ΔVTL step, as in the filenames. */
+/** A legacy grid tag (e.g. f110_vp28), or the explicit D19 r09_man/r09_woman id. */
 export type CellId = string;
 
 /**
- * One point of the 5x5 F0 x ΔVTL grid (DECISIONS D2).
+ * One of the 25 assessment-grid points, or one of the two training-only R9 points.
  *
  * Sign convention, inherited from the manifest: **negative = female** on both
  * axes. `answer` is null for the 8 `conflict` cells and the centre cell, which
@@ -284,7 +372,7 @@ export type CellId = string;
 export interface Cell
 {{
     id: CellId;
-    /** Nominal F0 target in Hz (110 | 131 | 156 | 185 | 220). */
+    /** Nominal F0 target in Hz; R9 uses 154.3196 / 157.6987. */
     f0TargetHz: number;
     /** Nominal ΔVTL in semitones as designed. */
     dvtlNominalSt: number;
@@ -294,8 +382,8 @@ export interface Cell
     vtlNominalN: number;
     /** Mean *realized* ΔVTL over the cell's train stimuli — the D6 regressor. */
     dvtlRealizedStTrain: number;
-    /** Mean *realized* ΔVTL over the cell's test stimuli. */
-    dvtlRealizedStTest: number;
+    /** Mean *realized* ΔVTL over test stimuli; null for the training-only R9 pair. */
+    dvtlRealizedStTest: number | null;
     region: Region;
     answer: Answer;
     nTrain: number;
@@ -312,6 +400,8 @@ export interface Stimulus
     /** Carrier sentence id (s01..s20) for train, CVC word for test. */
     token: string;
     cellId: CellId;
+    stimulusVersion: StimulusVersion;
+    assetOrigin: AssetOrigin;
     /** Measured duration in seconds — load-bearing: sizes the fall (INTEGRATION_DESIGN §7 P3). */
     durationS: number;
     f0RealizedHz: number;
@@ -365,7 +455,7 @@ export function cellById (id: CellId): Cell
     return cell;
 }}
 
-/** The stimuli at one grid cell in one set — {N_TRAIN_PER_CELL} sentences (train) or {N_TEST_PER_CELL} words (test). */
+/** The stimuli at one cell: 20 train sentences; legacy grid cells also have 4 test words. */
 export function stimuliFor (cellId: CellId, set: StimulusSet): readonly Stimulus[]
 {{
     return STIMULI_INDEX.get(`${{cellId}}:${{set}}`) ?? [];
@@ -410,16 +500,19 @@ def main() -> int:
     rows, digest = read_manifest(args.manifest)
 
     try:
-        stimuli, cells = build(rows)
+        stimuli, cells = build(rows, args.manifest.resolve())
         ladder = derive_ladder(cells)
     except CheckFailed as error:
         print(f"FAIL  {error}", file=sys.stderr)
         return 1
 
-    rendered = render(stimuli, cells, digest)
+    rendered = render(stimuli, cells, digest, len(rows))
 
     print(f"manifest  {args.manifest.relative_to(THESIS_ROOT)}  sha256:{digest}")
-    print(f"          {len(stimuli)} stimuli, {len(cells)} cells, 0 flagged")
+    print(
+        f"          {len(rows)} inventory rows, {len(stimuli)} playable stimuli, "
+        f"{len(cells)} train cells / {N_ASSESSMENT_CELLS} assessment cells, 0 flagged"
+    )
     print("ladder    (cross-check against TRAINING_LOOP §3; runtime truth is difficulty.ts)")
     for rung, ((man, woman), e) in enumerate(ladder, start=1):
         print(f"  R{rung}  E={e:5.2f}   man={man:<11} woman={woman}")

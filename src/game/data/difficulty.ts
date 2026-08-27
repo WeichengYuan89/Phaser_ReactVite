@@ -31,9 +31,9 @@ export const BETA_VTL = 0.59;
 /** ΔVTL (semitones) → normalised vtl_n (DECISIONS D2 / D6). */
 export const VTL_NORM_ST = 3.6;
 
-/** Rungs of the training ladder: R1 (easiest, warm-up) .. R8 (hardest). */
+/** Rungs of the D19 training ladder: R1 (easiest, warm-up) .. R9 (pilot-gated cap). */
 export const MIN_RUNG = 1;
-export const MAX_RUNG = 8;
+export const MAX_RUNG = 9;
 
 export type Rung = number;
 export type Level = Rung | 'excluded';
@@ -51,6 +51,11 @@ export function evidence (cell: Cell, set: 'train' | 'test' = 'train'): number
 {
     const dvtl = set === 'train' ? cell.dvtlRealizedStTrain : cell.dvtlRealizedStTest;
 
+    if (dvtl === null)
+    {
+        throw new Error(`Cell ${cell.id} has no ${set} stimuli.`);
+    }
+
     return (BETA_F0 * cell.f0n) + (BETA_VTL * (dvtl / VTL_NORM_ST));
 }
 
@@ -66,10 +71,11 @@ export interface LadderRung
 }
 
 /**
- * The 8 mirrored rungs, easiest first.
+ * The 9 mirrored rungs, easiest first.
  *
- * Trainable cells = 25 − 8 `conflict` − 1 centre = 16, paired by mirror symmetry
- * about the boundary, then sorted by descending evidence. Conflict cells are
+ * Trainable cells = the legacy 16 plus the D19 near-centre congruent R9 pair,
+ * paired by mirror symmetry about the boundary, then sorted by descending evidence.
+ * Conflict cells are
  * excluded from training outright (D10): they have no stimulus-intrinsic truth,
  * so any scoring rule would teach a cue weighting — which is exactly what RQ3
  * measures. They appear in the pre/post test instead, where that property is the

@@ -84,6 +84,8 @@ export interface TrialOutcome
     rungAfter: Rung;
     direction: 'up' | 'down' | null;
     reversal: boolean;
+    /** A qualifying upward step was blocked at R9; never a reversal (D19). */
+    capStall: boolean;
     warmupEnded: boolean;
     /** The plant on the correct-answer side advanced a stage. */
     grew: boolean;
@@ -210,6 +212,7 @@ export class TrainingSession
                 direction: null,
                 reversal: false,
                 warmupEnded: false,
+                capStall: false,
                 grew: false,
                 plantCompleted: false,
                 roundOver: this.roundOver
@@ -239,6 +242,7 @@ export class TrainingSession
             direction: update.direction,
             reversal: update.reversal,
             warmupEnded: update.warmupEnded,
+            capStall: update.capStall,
             grew: growth.advanced,
             plantCompleted: growth.completed,
             roundOver: this.roundOver

@@ -72,6 +72,8 @@ export interface StaircaseUpdate
     reversal: boolean;
     /** True on the trial that ends warm-up. */
     warmupEnded: boolean;
+    /** A qualifying upward step was blocked at R9; explicitly not a reversal (D19). */
+    capStall: boolean;
 }
 
 export function initStaircase (config: StaircaseConfig = DEFAULT_CONFIG): StaircaseState
@@ -118,18 +120,21 @@ export function updateStaircase (
             },
             direction: null,
             reversal: false,
-            warmupEnded: !stillWarming
+            warmupEnded: !stillWarming,
+            capStall: false
         };
     }
 
     let consecutiveCorrect = correct ? state.consecutiveCorrect + 1 : 0;
     let rung = state.rung;
     let direction: Direction | null = null;
+    let attemptedUp = false;
 
     if (correct)
     {
         if (consecutiveCorrect >= config.correctToStepUp)
         {
+            attemptedUp = true;
             rung = clampRung(state.rung + state.step);
             consecutiveCorrect = 0;
         }
@@ -142,7 +147,7 @@ export function updateStaircase (
     // A reversal requires the rung to have actually moved. At the floor and the
     // cap a step is absorbed by the clamp, and counting that as a direction
     // change would inflate the reversal count — and with it the convergence
-    // estimate that the next session starts from. Both ends stay leavable: R8
+    // estimate that the next session starts from. Both ends stay leavable: R9
     // still descends on a wrong answer, R1 still climbs on three correct.
     if (rung !== state.rung)
     {
@@ -152,6 +157,7 @@ export function updateStaircase (
     const reversal = direction !== null
         && state.lastDirection !== null
         && direction !== state.lastDirection;
+    const capStall = attemptedUp && state.rung === MAX_RUNG && rung === state.rung;
 
     return {
         state: {
@@ -167,7 +173,8 @@ export function updateStaircase (
         },
         direction,
         reversal,
-        warmupEnded: false
+        warmupEnded: false,
+        capStall
     };
 }
 

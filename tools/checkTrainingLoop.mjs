@@ -82,7 +82,7 @@ try
     const {
         initStaircase, updateStaircase, convergedRung,
         nextSittingStartRung, nextSittingConfig, withinSittingConfig, resumeStaircase,
-        DEFAULT_CONFIG
+        DEFAULT_CONFIG, MAX_RUNG
     } = await load('game/training/staircase.js');
     const { initCellPicker, pickCellForLevel, MAX_SAME_SIDE_RUN } = await load('game/training/cellPicker.js');
     const { Dealer } = await load('game/training/dealer.js');
@@ -91,7 +91,7 @@ try
         = await load('game/training/garden.js');
     const { TrialLog, toCsv } = await load('study/trialLog.js');
     const { otherSide, answerForLandingX, MIN_ANSWER_TRAVEL } = await load('shared/sides.js');
-    const { CELLS } = await load('game/data/stimulusCatalog.js');
+    const { CELLS, STIMULI, STIMULUS_VERSION } = await load('game/data/stimulusCatalog.js');
     const { readCarryOver, writeCarryOver, clearCarryOver } = await load('study/sessionStore.js');
     const {
         roadmap, totalBlocks, sittingOfBlock, blockWithinSitting, sittingId,
@@ -152,14 +152,27 @@ try
         assert.equal(state.rung, 1);
     });
 
-    check('the cap is NOT absorbing — R8 descends on a wrong answer', () =>
+    check('R9 cap_stall is explicit, is not a reversal, and an error descends to R8', () =>
     {
-        const config = { ...DEFAULT_CONFIG, initialStep: 1, startRung: 8 };
-        const { state: atCap } = run([...warmup, true, true, true], config);
-        assert.equal(atCap.rung, 8, 'should be pinned at the cap');
+        const config = { ...DEFAULT_CONFIG, initialStep: 1, startRung: 9 };
+        let { state } = run(warmup, config);
+        let update;
 
-        const after = updateStaircase(atCap, false, config).state;
-        assert.equal(after.rung, 7, 'R8 is absorbing — this is the defect being fixed');
+        for (let i = 0; i < 3; i += 1)
+        {
+            update = updateStaircase(state, true, config);
+            state = update.state;
+        }
+
+        assert.equal(state.rung, 9, 'should be pinned at the R9 cap');
+        assert.equal(update.capStall, true, 'qualifying blocked step was not marked cap_stall');
+        assert.equal(update.direction, null, 'cap_stall is not an actual movement');
+        assert.equal(update.reversal, false, 'cap_stall must not inflate reversals');
+
+        const after = updateStaircase(state, false, config);
+        assert.equal(after.state.rung, 8, 'R9 is absorbing — an error must return to R8');
+        assert.equal(after.direction, 'down');
+        assert.equal(after.capStall, false);
     });
 
     check('the floor is not absorbing either — R1 climbs on three correct', () =>
@@ -234,7 +247,7 @@ try
     {
         // A listener whose accuracy falls with rung. 3-down/1-up should settle
         // where p(correct) ~ 0.794, i.e. around R5-R6 for this profile.
-        const pCorrect = [1, 0.99, 0.97, 0.94, 0.88, 0.79, 0.62, 0.55];
+        const pCorrect = [1, 0.99, 0.97, 0.94, 0.88, 0.79, 0.62, 0.55, 0.5];
         const rng = (() => { let s = 12345; return () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648; })();
         const config = { ...DEFAULT_CONFIG, initialStep: 2 };
 
@@ -255,13 +268,45 @@ try
 
     check('a rung\'s two cells carry opposite answers', () =>
     {
-        for (let rung = 1; rung <= 8; rung += 1)
+        for (let rung = 1; rung <= MAX_RUNG; rung += 1)
         {
             const man = pickCellForLevel(rung, { lastSide: 'woman', sameSideRun: 9 }, () => 0);
             const woman = pickCellForLevel(rung, { lastSide: 'man', sameSideRun: 9 }, () => 0);
             assert.equal(man.cell.answer, 'man', `rung ${rung}`);
             assert.equal(woman.cell.answer, 'woman', `rung ${rung}`);
         }
+    });
+
+    check('R8 steps into the explicit R9 pair and R9 preserves side balance', () =>
+    {
+        const man = pickCellForLevel(9, { lastSide: 'woman', sameSideRun: 9 }, () => 0);
+        const woman = pickCellForLevel(9, { lastSide: 'man', sameSideRun: 9 }, () => 0);
+
+        assert.equal(man.cell.id, 'r09_man');
+        assert.equal(man.cell.answer, 'man');
+        assert.equal(woman.cell.id, 'r09_woman');
+        assert.equal(woman.cell.answer, 'woman');
+
+        const config = { ...DEFAULT_CONFIG, warmupTrials: 0, initialStep: 1 };
+        let state = { ...initStaircase(config), rung: 8, inWarmup: false };
+        for (let i = 0; i < 3; i += 1) state = updateStaircase(state, true, config).state;
+        assert.equal(state.rung, 9, 'three correct at R8 did not reach R9');
+    });
+
+    check('the runtime catalog is one declared composite with train-only R9 and unchanged assessment', () =>
+    {
+        assert.equal(STIMULUS_VERSION, 'v1_plus_r9');
+        assert.equal(CELLS.length, 27);
+        assert.equal(STIMULI.filter((s) => s.set === 'train').length, 540);
+        assert.equal(STIMULI.filter((s) => s.set === 'test').length, 100);
+        assert.equal(new Set(STIMULI.filter((s) => s.set === 'test').map((s) => s.cellId)).size, 25);
+
+        const r9 = STIMULI.filter((s) => s.cellId === 'r09_man' || s.cellId === 'r09_woman');
+        assert.equal(r9.length, 40);
+        assert.equal(r9.every((s) => s.set === 'train'), true, 'R9 leaked into rapid assessment');
+        assert.equal(r9.every((s) => s.assetOrigin === 'v1_plus_r9'), true);
+        assert.equal(STIMULI.every((s) => s.stimulusVersion === STIMULUS_VERSION), true);
+        assert.equal(STIMULI.some((s) => s.path.includes('r1_r9_v2')), false, 'v2 leaked into runtime');
     });
 
     check(`never more than ${MAX_SAME_SIDE_RUN} consecutive same-side trials`, () =>
@@ -464,7 +509,7 @@ try
 
     process.stdout.write('\ncross-session carry-over (PROGRESS 2.6e)\n');
 
-    /** A valid v2 record (D16). `over` patches whatever the check is about. */
+    /** A valid v3 record (D19). `over` patches whatever the check is about. */
     const carryOf = (over = {}) => ({
         group: 'NH',
         lastSittingId: 'sitting-1',
@@ -536,7 +581,7 @@ try
     {
         window.localStorage.setItem(
             'voice-plant:participant:P11',
-            JSON.stringify({ ...carryOf(), version: 2, staircase: undefined })
+            JSON.stringify({ ...carryOf(), version: 3, staircase: undefined })
         );
 
         assert.equal(readCarryOver('P11'), null);
@@ -750,6 +795,8 @@ try
 
             assert.ok(watered !== null, 'a steered drop must resolve to a side');
 
+            const outcome = session.recordResult(correct ? 'correct' : 'incorrect');
+
             log.add({
                 mode: 'train',
                 trialIdx: trial.index,
@@ -760,12 +807,13 @@ try
                 rtMs: 900 + (rng() * 600),
                 audioOnsetMs: 1000 + trial.index,
                 difficultyLevel: trial.rung,
+                difficultyLevelAfter: outcome.rungAfter,
                 staircaseState: trial.staircaseState,
+                staircaseEvent: outcome.capStall ? 'cap_stall' : outcome.direction,
+                staircaseReversal: outcome.reversal,
                 landingX,
                 fallDurationMs: trial.fallDurationMs
             });
-
-            session.recordResult(correct ? 'correct' : 'incorrect');
         }
 
         return { log, session };
@@ -780,14 +828,17 @@ try
         assert.equal(lines.length, 61, 'header + 60 rows');
 
         const header = lines[0].split(',');
-        for (const column of ['stimulusId', 'response', 'correct', 'rtMs', 'difficultyLevel',
-            'staircaseState', 'landingX', 'fallDurationMs', 'vtlN', 'region',
+        for (const column of ['stimulusVersion', 'stimulusId', 'response', 'correct', 'rtMs',
+            'difficultyLevel', 'difficultyLevelAfter', 'staircaseState', 'staircaseEvent',
+            'staircaseReversal', 'landingX', 'fallDurationMs', 'vtlN', 'region',
             // The arm, as a column: D15-2 forbids pooling CI and NH, and an
             // analysis that infers the arm from an id prefix will get it wrong.
             'group'])
         {
             assert.ok(header.includes(column), `missing column ${column}`);
         }
+
+        assert.equal(log.all().every((record) => record.stimulusVersion === 'v1_plus_r9'), true);
     });
 
     check('the logged response is the side watered, and correct follows from it', () =>
@@ -796,11 +847,54 @@ try
 
         for (const record of log.all())
         {
-            const cell = CELLS.find((c) => c.id === record.stimulusId.match(/(f\d+_v[a-z]*\d+)$/)[1]);
+            const stimulus = STIMULI.find((candidate) => candidate.id === record.stimulusId);
+            const cell = stimulus && CELLS.find((candidate) => candidate.id === stimulus.cellId);
             assert.ok(cell, `no cell for ${record.stimulusId}`);
             assert.equal(record.correct, record.response === cell.answer,
                 `${record.stimulusId}: response=${record.response} answer=${cell.answer} correct=${record.correct}`);
         }
+    });
+
+    check('a blocked qualifying step at R9 is exported as cap_stall, never reversal', () =>
+    {
+        const config = { ...DEFAULT_CONFIG, warmupTrials: 0, initialStep: 1 };
+        const staircase = {
+            ...initStaircase(config),
+            rung: 9,
+            inWarmup: false,
+            consecutiveCorrect: 2,
+            lastDirection: 'up'
+        };
+        const session = new TrainingSession({ staircase, config, rng: () => 0.25, trialsPerRound: 1 });
+        const log = new TrialLog({ participantId: 'P-cap', group: 'CI', sessionId: 'sitting-1', block: 'block-1' });
+        const trial = session.nextTrial();
+        const outcome = session.recordResult('correct');
+
+        log.add({
+            mode: 'train',
+            trialIdx: trial.index,
+            stimulus: trial.stimulus,
+            cell: trial.cell,
+            response: trial.answer,
+            scoreCorrectness: true,
+            rtMs: 1000,
+            audioOnsetMs: 500,
+            difficultyLevel: trial.rung,
+            difficultyLevelAfter: outcome.rungAfter,
+            staircaseState: trial.staircaseState,
+            staircaseEvent: outcome.capStall ? 'cap_stall' : outcome.direction,
+            staircaseReversal: outcome.reversal
+        });
+
+        const record = log.all()[0];
+        assert.equal(trial.rung, 9);
+        assert.equal(record.stimulusVersion, 'v1_plus_r9');
+        assert.equal(record.difficultyLevel, 9);
+        assert.equal(record.difficultyLevelAfter, 9);
+        assert.equal(record.staircaseEvent, 'cap_stall');
+        assert.equal(record.staircaseReversal, false);
+        assert.equal(outcome.capStall, true);
+        assert.equal(outcome.reversal, false);
     });
 
     check('training rows never carry a null correct — conflict cells are excluded', () =>
@@ -1328,7 +1422,7 @@ try
             'voice-plant:participant:P22',
             JSON.stringify({
                 ...carryOf(),
-                version: 2,
+                version: 3,
                 placements: { man: [{ x: 'left' }], woman: null }
             })
         );

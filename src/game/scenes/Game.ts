@@ -7,7 +7,7 @@ import { createGameHud, showLandingFeedback, updateGameHud } from '../ui/gameHud
 import { createGardenView, GardenView, GARDEN_DEPTH_CEILING } from '../ui/gardenView';
 import { createFence } from '../ui/fence';
 import { TRIALS_PER_ROUND } from '../training/garden';
-import { TrainingSession, TrainingTrial } from '../training/trainingSession';
+import { TrainingSession, TrainingTrial, TrialOutcome } from '../training/trainingSession';
 import {
     DEFAULT_CONFIG,
     convergedRung,
@@ -392,9 +392,9 @@ export class Game extends Scene
         cluster.trail = null;
         this.windFx.clear();
 
-        this.logTrial(cluster, 'aborted', null, null);
-
         const outcome = this.session.recordResult('aborted');
+
+        this.logTrial(cluster, 'aborted', null, null, outcome);
 
         this.waterBucket.holdCluster(cluster.container, cluster.trial.stimulus, () =>
         {
@@ -429,11 +429,11 @@ export class Game extends Scene
             ? performance.now() - cluster.playback.onsetMs
             : null;
 
-        this.logTrial(cluster, watered ?? 'timeout', rtMs, landedX);
-
         const outcome = this.session.recordResult(
             !answered ? 'timeout' : (correct ? 'correct' : 'incorrect')
         );
+
+        this.logTrial(cluster, watered ?? 'timeout', rtMs, landedX, outcome);
 
         this.garden.render(this.session.garden);
 
@@ -481,7 +481,8 @@ export class Game extends Scene
         cluster: ClusterState,
         response: Response,
         rtMs: number | null,
-        landingX: number | null
+        landingX: number | null,
+        outcome: TrialOutcome
     )
     {
         this.log.add({
@@ -496,7 +497,10 @@ export class Game extends Scene
             rtMs,
             audioOnsetMs: cluster.playback?.onsetMs ?? 0,
             difficultyLevel: cluster.trial.rung,
+            difficultyLevelAfter: outcome.rungAfter,
             staircaseState: cluster.trial.staircaseState,
+            staircaseEvent: outcome.capStall ? 'cap_stall' : outcome.direction,
+            staircaseReversal: outcome.reversal,
             landingX,
             fallDurationMs: cluster.trial.fallDurationMs
         });
