@@ -31,6 +31,14 @@ import {
     initStaircase,
     updateStaircase
 } from './staircase';
+import {
+    WILDCARD_PROBES_PER_BLOCK,
+    WildcardProgress,
+    initWildcardProgress,
+    nextProbeGap,
+    pickWildcard,
+    unlockWildcard
+} from './wildcardProbe';
 
 /**
  * Fall timing — the P3 fix. `fallSpeed` currently ramps 110 → 220 px/s across a
@@ -51,12 +59,19 @@ export function fallDurationMs (stimulus: Stimulus): number
 
 export interface TrainingTrial
 {
+    /** Back-compatible alias of presentationIndex. */
     index: number;
+    presentationIndex: number;
+    /** Number of scored R1–R9 presentations completed before this presentation. */
+    scoredTrialIndex: number;
+    trialType: 'scored_staircase' | 'wildcard_probe';
     rung: Rung;
     cell: Cell;
     stimulus: Stimulus;
-    /** The correct response. Never null: excluded cells never enter training. */
-    answer: Side;
+    /** Null for wildcard probes: conflict cells have no ground truth. */
+    answer: Side | null;
+    /** The mirrored conflict pair, for probe balancing and reconstruction. */
+    probePairId: string | null;
     fallDurationMs: number;
     /** Snapshot for the trial log (INTEGRATION_DESIGN §8). */
     staircaseState: string;
@@ -75,6 +90,8 @@ export interface TrainingSessionOptions
     dealer?: Dealer;
     /** Carried over from the previous block (DECISIONS D11-3, D16-3). */
     garden?: GardenState;
+    /** R9 unlock and conflict/token rotation carried across blocks (D22). */
+    wildcard?: WildcardProgress;
     trialsPerRound?: number;
 }
 
@@ -91,26 +108,45 @@ export interface TrialOutcome
     grew: boolean;
     /** That advance completed a plant; a new seedling has been sown beside it. */
     plantCompleted: boolean;
-    /** True once the fixed trial count is reached — never performance-dependent. */
+    /** A side choice on a wildcard probe earned neutral positive feedback. */
+    rewardGranted: boolean;
+    /** True only for answered scored trials; probes and non-responses are false. */
+    includedInAccuracy: boolean;
+    wildcardUnlockedBefore: boolean;
+    wildcardUnlockedAfter: boolean;
+    wildcardUnlockTriggered: boolean;
+    /** Opaque post-trial snapshot; identical to the pre-snapshot for a probe. */
+    staircaseStateAfter: string;
+    /** True once 60 scored presentations are reached — probes never advance it. */
     roundOver: boolean;
 }
+
+export type TrainingResult = 'correct' | 'incorrect' | 'wildcard' | 'aborted' | 'timeout';
 
 export class TrainingSession
 {
     private staircase: StaircaseState;
     private picker: CellPickerState = initCellPicker();
     private dealer: Dealer;
-    private trialIndex = 0;
+    private presentationIndex = 0;
+    private scoredTrialIndex = 0;
     private pending: TrainingTrial | null = null;
     private correctCount = 0;
     private answeredCount = 0;
     private gardenState: GardenState;
+    private wildcardProgress: WildcardProgress;
+    private probesPresented = 0;
+    private nextProbeAtScored: number | null;
 
     constructor (private readonly options: TrainingSessionOptions = {})
     {
         this.staircase = options.staircase ?? initStaircase(options.config ?? DEFAULT_CONFIG);
         this.dealer = options.dealer ?? new Dealer(undefined, options.rng);
         this.gardenState = options.garden ?? initGarden();
+        this.wildcardProgress = options.wildcard ?? initWildcardProgress();
+        this.nextProbeAtScored = this.wildcardProgress.unlocked
+            ? nextProbeGap(options.rng)
+            : null;
     }
 
     get state (): Readonly<StaircaseState>
@@ -129,15 +165,26 @@ export class TrainingSession
         return this.gardenState;
     }
 
-    /** Trials presented so far, including aborted ones (DECISIONS D11). */
+    get wildcard (): Readonly<WildcardProgress>
+    {
+        return this.wildcardProgress;
+    }
+
+    /** All presentations so far, including probes and aborted ones. */
     get trialsPresented (): number
     {
-        return this.trialIndex;
+        return this.presentationIndex;
+    }
+
+    /** Normal R1–R9 presentations; the fixed block-dose counter. */
+    get scoredTrialsPresented (): number
+    {
+        return this.scoredTrialIndex;
     }
 
     get roundOver (): boolean
     {
-        return roundComplete(this.trialIndex, this.options.trialsPerRound ?? TRIALS_PER_ROUND);
+        return roundComplete(this.scoredTrialIndex, this.options.trialsPerRound ?? TRIALS_PER_ROUND);
     }
 
     /** Correct answers / answered trials so far — the in-game learning curve input. */
@@ -159,6 +206,35 @@ export class TrainingSession
         }
 
         const rng = this.options.rng ?? Math.random;
+        const wildcardDue = this.wildcardProgress.unlocked
+            && this.probesPresented < WILDCARD_PROBES_PER_BLOCK
+            && this.nextProbeAtScored !== null
+            && this.scoredTrialIndex >= this.nextProbeAtScored
+            && !this.roundOver;
+
+        if (wildcardDue)
+        {
+            const pick = pickWildcard(this.wildcardProgress);
+            const stimulus = stimulusFor(pick.cell.id, 'train', pick.token);
+
+            this.wildcardProgress = pick.progress;
+            this.pending = {
+                index: this.presentationIndex,
+                presentationIndex: this.presentationIndex,
+                scoredTrialIndex: this.scoredTrialIndex,
+                trialType: 'wildcard_probe',
+                rung: this.staircase.rung,
+                cell: pick.cell,
+                stimulus,
+                answer: null,
+                probePairId: pick.pairId,
+                fallDurationMs: fallDurationMs(stimulus),
+                staircaseState: describeStaircase(this.staircase)
+            };
+
+            return this.pending;
+        }
+
         const pick = pickCellForLevel(this.staircase.rung, this.picker, rng);
 
         this.picker = pick.state;
@@ -167,11 +243,15 @@ export class TrainingSession
         const stimulus = stimulusFor(pick.cell.id, 'train', token);
 
         this.pending = {
-            index: this.trialIndex,
+            index: this.presentationIndex,
+            presentationIndex: this.presentationIndex,
+            scoredTrialIndex: this.scoredTrialIndex,
+            trialType: 'scored_staircase',
             rung: this.staircase.rung,
             cell: pick.cell,
             stimulus,
             answer: pick.side,
+            probePairId: null,
             fallDurationMs: fallDurationMs(stimulus),
             staircaseState: describeStaircase(this.staircase)
         };
@@ -191,18 +271,72 @@ export class TrainingSession
      *    the midline. Treating that as an answer would manufacture a response
      *    from a participant who gave none (see `answerForLandingX`).
      */
-    recordResult (outcome: 'correct' | 'incorrect' | 'aborted' | 'timeout'): TrialOutcome
+    recordResult (outcome: TrainingResult, wildcardSide?: Side): TrialOutcome
     {
         if (!this.pending)
         {
             throw new Error('recordResult() called with no pending trial; call nextTrial() first.');
         }
 
+        const trial = this.pending;
         const rungBefore = this.staircase.rung;
-        const side = this.pending.answer;
+        const unlockedBefore = this.wildcardProgress.unlocked;
 
         this.pending = null;
-        this.trialIndex += 1;
+        this.presentationIndex += 1;
+
+        if (trial.trialType === 'wildcard_probe')
+        {
+            if (outcome === 'correct' || outcome === 'incorrect')
+            {
+                throw new Error('Wildcard probes must be recorded as wildcard, aborted or timeout.');
+            }
+
+            this.probesPresented += 1;
+            this.nextProbeAtScored = this.scoredTrialIndex + nextProbeGap(this.options.rng);
+
+            const rewardGranted = outcome === 'wildcard';
+            const growth = rewardGranted
+                ? grow(this.gardenState, requireWildcardSide(wildcardSide), true)
+                : { state: this.gardenState, advanced: false, completed: false };
+
+            this.gardenState = growth.state;
+
+            return {
+                rungBefore,
+                rungAfter: rungBefore,
+                direction: null,
+                reversal: false,
+                warmupEnded: false,
+                capStall: false,
+                grew: growth.advanced,
+                plantCompleted: growth.completed,
+                rewardGranted,
+                includedInAccuracy: false,
+                wildcardUnlockedBefore: unlockedBefore,
+                wildcardUnlockedAfter: true,
+                wildcardUnlockTriggered: false,
+                staircaseStateAfter: describeStaircase(this.staircase),
+                roundOver: this.roundOver
+            };
+        }
+
+        if (outcome === 'wildcard')
+        {
+            throw new Error('A scored staircase trial cannot be recorded as wildcard.');
+        }
+
+        this.scoredTrialIndex += 1;
+
+        const unlockTriggered = trial.rung === 9
+            && outcome !== 'aborted'
+            && !this.wildcardProgress.unlocked;
+
+        if (unlockTriggered)
+        {
+            this.wildcardProgress = unlockWildcard(this.wildcardProgress, this.options.rng);
+            this.nextProbeAtScored = this.scoredTrialIndex + nextProbeGap(this.options.rng);
+        }
 
         if (outcome === 'aborted' || outcome === 'timeout')
         {
@@ -215,6 +349,12 @@ export class TrainingSession
                 capStall: false,
                 grew: false,
                 plantCompleted: false,
+                rewardGranted: false,
+                includedInAccuracy: false,
+                wildcardUnlockedBefore: unlockedBefore,
+                wildcardUnlockedAfter: this.wildcardProgress.unlocked,
+                wildcardUnlockTriggered: unlockTriggered,
+                staircaseStateAfter: describeStaircase(this.staircase),
                 roundOver: this.roundOver
             };
         }
@@ -232,7 +372,7 @@ export class TrainingSession
 
         this.staircase = update.state;
 
-        const growth = grow(this.gardenState, side, correct);
+        const growth = grow(this.gardenState, trial.answer as Side, correct);
 
         this.gardenState = growth.state;
 
@@ -245,7 +385,23 @@ export class TrainingSession
             capStall: update.capStall,
             grew: growth.advanced,
             plantCompleted: growth.completed,
+            rewardGranted: correct,
+            includedInAccuracy: true,
+            wildcardUnlockedBefore: unlockedBefore,
+            wildcardUnlockedAfter: this.wildcardProgress.unlocked,
+            wildcardUnlockTriggered: unlockTriggered,
+            staircaseStateAfter: describeStaircase(this.staircase),
             roundOver: this.roundOver
         };
     }
+}
+
+function requireWildcardSide (side: Side | undefined): Side
+{
+    if (!side)
+    {
+        throw new Error('An answered wildcard probe must include the watered side.');
+    }
+
+    return side;
 }

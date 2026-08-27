@@ -8,6 +8,7 @@
  *   - which sitting the last block belonged to, which is what tells those two
  *     cases apart;
  *   - the garden, and now also where each plant stands (D11-3, D16-3);
+ *   - whether R9 has unlocked D22 probes and where their cell/token rotation is;
  *   - how many blocks are done, which is the roadmap's only input (D15-4).
  *
  * **The storage medium is provisional.** INTEGRATION_DESIGN §10 lists
@@ -22,6 +23,7 @@
 import { GardenState } from '../game/training/garden';
 import { GardenPlacements, isPlacementList, trimPlacements } from '../game/ui/gardenPlacement';
 import { StaircaseState } from '../game/training/staircase';
+import { WildcardProgress, isWildcardProgress } from '../game/training/wildcardProbe';
 import { ParticipantGroup, isGroup } from './protocol';
 
 const KEY_PREFIX = 'voice-plant:participant:';
@@ -41,8 +43,11 @@ const IDENTITY_KEY = 'voice-plant:current';
  * v3 (2026-08-26, D19): stimulus inventory changes from legacy v1 R1–R8 to the
  * declared v1_plus_r9 R1–R9 composite. Old carry-over must not silently resume
  * inside a block using the new ladder.
+ * v4 (2026-08-27, D22): adds the R9-unlocked wildcard state and its balanced
+ * conflict-cell/carrier rotation. A v3 record cannot prove that R9 was actually
+ * presented, so it must not infer the unlock from a stored rung.
  */
-const RECORD_VERSION = 3;
+const RECORD_VERSION = 4;
 
 export interface ParticipantIdentity
 {
@@ -62,6 +67,7 @@ export interface CarryOver
     staircase: StaircaseState;
     garden: GardenState;
     placements: GardenPlacements;
+    wildcard: WildcardProgress;
     /** Training blocks this participant has completed — the roadmap's input. */
     blocksCompleted: number;
 }
@@ -135,7 +141,8 @@ export function readCarryOver (participantId: string): CarryOver | null
         || typeof stored.lastSittingId !== 'string'
         || typeof stored.blocksCompleted !== 'number'
         || !stored.staircase
-        || !stored.garden)
+        || !stored.garden
+        || !isWildcardProgress(stored.wildcard))
     {
         return null;
     }
@@ -148,6 +155,7 @@ export function readCarryOver (participantId: string): CarryOver | null
         lastSittingId: stored.lastSittingId,
         staircase: stored.staircase,
         garden: stored.garden,
+        wildcard: stored.wildcard,
         placements: {
             man: isPlacementList(placements?.man) ? placements.man : [],
             woman: isPlacementList(placements?.woman) ? placements.woman : []

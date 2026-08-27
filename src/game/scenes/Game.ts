@@ -170,9 +170,14 @@ export class Game extends Scene
                     ? {
                         config: withinSittingConfig(carry.staircase),
                         staircase: resumeStaircase(carry.staircase),
-                        garden: carry.garden
+                        garden: carry.garden,
+                        wildcard: carry.wildcard
                     }
-                    : { config: nextSittingConfig(carry.staircase), garden: carry.garden })
+                    : {
+                        config: nextSittingConfig(carry.staircase),
+                        garden: carry.garden,
+                        wildcard: carry.wildcard
+                    })
         );
 
         this.add.rectangle(width / 2, height / 2, width, height, 0x0f1519);
@@ -329,7 +334,14 @@ export class Game extends Scene
 
         this.activeCluster = cluster;
 
-        updateGameHud({ trialText: this.trialText }, trial.index + 1, TRIALS_PER_ROUND);
+        updateGameHud(
+            { trialText: this.trialText },
+            trial.trialType === 'wildcard_probe'
+                ? trial.scoredTrialIndex
+                : trial.scoredTrialIndex + 1,
+            TRIALS_PER_ROUND,
+            trial.trialType === 'wildcard_probe'
+        );
 
         void this.player.play(trial.stimulus).then((playback) =>
         {
@@ -424,28 +436,43 @@ export class Game extends Scene
         // answer, and scoring it either way would invent data.
         const watered = answerForLandingX(landedX, this.scale.width);
         const answered = watered !== null;
-        const correct = watered === cluster.trial.answer;
+        const correct = cluster.trial.answer !== null && watered === cluster.trial.answer;
         const rtMs = answered && cluster.playback
             ? performance.now() - cluster.playback.onsetMs
             : null;
 
         const outcome = this.session.recordResult(
-            !answered ? 'timeout' : (correct ? 'correct' : 'incorrect')
+            !answered
+                ? 'timeout'
+                : (cluster.trial.trialType === 'wildcard_probe'
+                    ? 'wildcard'
+                    : (correct ? 'correct' : 'incorrect')),
+            watered ?? undefined
         );
 
         this.logTrial(cluster, watered ?? 'timeout', rtMs, landedX, outcome);
 
         this.garden.render(this.session.garden);
 
-        if (outcome.plantCompleted)
+        if (cluster.trial.trialType === 'wildcard_probe' && outcome.rewardGranted && watered)
+        {
+            this.garden.celebrate(watered);
+        }
+        else if (outcome.plantCompleted && cluster.trial.answer)
         {
             this.garden.celebrate(cluster.trial.answer);
         }
 
         showLandingFeedback(
             this,
-            answered ? (correct ? 'correct' : 'incorrect') : 'no-answer',
-            PLANT_LABEL[PLANT_FOR_SIDE[cluster.trial.answer]],
+            answered
+                ? (cluster.trial.trialType === 'wildcard_probe'
+                    ? 'wildcard'
+                    : (correct ? 'correct' : 'incorrect'))
+                : 'no-answer',
+            cluster.trial.answer
+                ? PLANT_LABEL[PLANT_FOR_SIDE[cluster.trial.answer]]
+                : '',
             landedX
         );
 
@@ -473,9 +500,10 @@ export class Game extends Scene
     /**
      * One record per trial (INTEGRATION_DESIGN §8).
      *
-     * `scoreCorrectness: true` here and only here: training cells always have a
-     * ground truth, because conflict and centre cells are excluded from the
-     * ladder (D10-4). The pre/post test passes false.
+     * `scoreCorrectness` is true only for R1–R9 staircase trials. D22 conflict
+     * probes use the same training scene but explicitly pass false: their
+     * positive plant reward is not a ground-truth judgement. The pre/post test
+     * also passes false.
      */
     private logTrial (
         cluster: ClusterState,
@@ -488,19 +516,33 @@ export class Game extends Scene
         this.log.add({
             mode: 'train',
             trialIdx: cluster.trial.index,
+            trialType: cluster.trial.trialType,
+            presentationIdx: cluster.trial.presentationIndex,
+            scoredTrialIdx: cluster.trial.scoredTrialIndex,
             stimulus: cluster.trial.stimulus,
             cell: cluster.trial.cell,
             // The side actually watered, not whether it was right — `correct` is
             // derived from the cell inside the logger.
             response,
-            scoreCorrectness: true,
+            scoreCorrectness: cluster.trial.trialType === 'scored_staircase',
             rtMs,
             audioOnsetMs: cluster.playback?.onsetMs ?? 0,
-            difficultyLevel: cluster.trial.rung,
-            difficultyLevelAfter: outcome.rungAfter,
+            difficultyLevel: cluster.trial.trialType === 'scored_staircase'
+                ? cluster.trial.rung
+                : null,
+            difficultyLevelAfter: cluster.trial.trialType === 'scored_staircase'
+                ? outcome.rungAfter
+                : null,
             staircaseState: cluster.trial.staircaseState,
+            staircaseStateAfter: outcome.staircaseStateAfter,
             staircaseEvent: outcome.capStall ? 'cap_stall' : outcome.direction,
             staircaseReversal: outcome.reversal,
+            probePairId: cluster.trial.probePairId,
+            rewardGranted: outcome.rewardGranted,
+            includedInAccuracy: outcome.includedInAccuracy,
+            wildcardUnlockedBefore: outcome.wildcardUnlockedBefore,
+            wildcardUnlockedAfter: outcome.wildcardUnlockedAfter,
+            wildcardUnlockTriggered: outcome.wildcardUnlockTriggered,
             landingX,
             fallDurationMs: cluster.trial.fallDurationMs
         });
@@ -537,6 +579,7 @@ export class Game extends Scene
             staircase: this.session.state,
             garden: this.session.garden,
             placements: this.garden.placements(),
+            wildcard: this.session.wildcard,
             blocksCompleted
         });
 

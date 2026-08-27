@@ -50,6 +50,7 @@ try
             'src/game/training/staircase.ts',
             'src/game/training/cellPicker.ts',
             'src/game/training/dealer.ts',
+            'src/game/training/wildcardProbe.ts',
             'src/study/trialLog.ts',
             'src/study/sessionStore.ts',
             'src/study/protocol.ts',
@@ -87,6 +88,10 @@ try
     const { initCellPicker, pickCellForLevel, MAX_SAME_SIDE_RUN } = await load('game/training/cellPicker.js');
     const { Dealer } = await load('game/training/dealer.js');
     const { TrainingSession, fallDurationMs } = await load('game/training/trainingSession.js');
+    const {
+        CONFLICT_PAIRS, WILDCARD_PROBES_PER_BLOCK, MIN_SCORED_GAP, MAX_SCORED_GAP,
+        initWildcardProgress
+    } = await load('game/training/wildcardProbe.js');
     const { initGarden, grow, stagesGrown, CORRECT_PER_STAGE, STAGES_PER_PLANT, TRIALS_PER_ROUND }
         = await load('game/training/garden.js');
     const { TrialLog, toCsv } = await load('study/trialLog.js');
@@ -102,6 +107,12 @@ try
         trimPlacements, emptyPlacements, MAX_PLACEMENTS, MIN_PLANT_GAP_X,
         Y_FAR, Y_NEAR, BED_HALF
     } = await load('game/ui/gardenPlacement.js');
+
+    /** Apply the result that belongs to the actual presentation type. */
+    const recordPresented = (session, trial, scoredOutcome = 'correct', wildcardSide = 'man') =>
+        trial.trialType === 'wildcard_probe'
+            ? session.recordResult('wildcard', wildcardSide)
+            : session.recordResult(scoredOutcome);
 
     /** Drive the staircase through a sequence of outcomes. */
     const run = (outcomes, config = DEFAULT_CONFIG) =>
@@ -402,10 +413,16 @@ try
         const session = new TrainingSession({ rng });
         const sides = [];
 
-        for (let i = 0; i < 200; i += 1)
+        while (sides.length < 200)
         {
-            sides.push(session.nextTrial().answer);
-            session.recordResult('correct');
+            const trial = session.nextTrial();
+
+            if (trial.trialType === 'scored_staircase')
+            {
+                sides.push(trial.answer);
+            }
+
+            recordPresented(session, trial, 'correct');
         }
 
         let alternations = 0;
@@ -462,7 +479,7 @@ try
                 `fall ${trial.fallDurationMs}ms vs sentence ${trial.stimulus.durationS}s`
             );
             assert.ok(trial.fallDurationMs >= 4500);
-            session.recordResult('correct');
+            recordPresented(session, trial, 'correct');
         }
     });
 
@@ -486,19 +503,22 @@ try
         assert.ok(byStimulus.size > 10);
     });
 
-    check('a 60-trial round fits the 5-minute dose', () =>
+    check('a 60-scored-trial round plus unlocked probes fits the planned dose', () =>
     {
         const session = new TrainingSession({ rng: () => 0.4 });
         let total = 0;
 
-        for (let i = 0; i < 60; i += 1)
+        while (!session.roundOver)
         {
-            total += session.nextTrial().fallDurationMs + 1000; // + inter-trial gap
-            session.recordResult('correct');
+            const trial = session.nextTrial();
+            total += trial.fallDurationMs + 1000; // + inter-trial gap
+            recordPresented(session, trial, 'correct');
         }
 
         const minutes = total / 60000;
-        assert.ok(minutes > 4.5 && minutes < 7, `60 trials would take ${minutes.toFixed(1)} min`);
+        assert.equal(session.scoredTrialsPresented, 60);
+        assert.ok(session.trialsPresented >= 60 && session.trialsPresented <= 64);
+        assert.ok(minutes > 4.5 && minutes < 7.5, `block would take ${minutes.toFixed(1)} min`);
     });
 
     check('fallDurationMs floors at 4.5 s for short stimuli', () =>
@@ -507,22 +527,189 @@ try
         assert.equal(fallDurationMs({ durationS: 3.67 }), 4670);
     });
 
+    process.stdout.write('\nR9-unlocked wildcard probes (D22)\n');
+
+    const sessionAtR9 = (over = {}) =>
+    {
+        const config = { ...DEFAULT_CONFIG, warmupTrials: 0, initialStep: 1 };
+        const staircase = {
+            ...initStaircase(config),
+            rung: 9,
+            inWarmup: false
+        };
+
+        return new TrainingSession({ staircase, config, rng: () => 0, ...over });
+    };
+
+    check('the probe inventory is exactly four mirrored conflict pairs and excludes centre', () =>
+    {
+        const cells = CONFLICT_PAIRS.flatMap((pair) => pair.cells);
+
+        assert.equal(CONFLICT_PAIRS.length, 4);
+        assert.equal(cells.length, 8);
+        assert.equal(new Set(cells.map((cell) => cell.id)).size, 8);
+        assert.equal(cells.every((cell) => cell.region === 'conflict' && cell.answer === null), true);
+        assert.equal(cells.some((cell) => cell.id === 'f156_v00'), false);
+
+        for (const pair of CONFLICT_PAIRS)
+        {
+            assert.equal(pair.cells[0].f0n, -pair.cells[1].f0n);
+            assert.equal(pair.cells[0].vtlNominalN, -pair.cells[1].vtlNominalN);
+        }
+    });
+
+    check('only a completed R9 presentation unlocks probes', () =>
+    {
+        const completed = sessionAtR9();
+        const trial = completed.nextTrial();
+        const outcome = completed.recordResult('incorrect');
+
+        assert.equal(trial.trialType, 'scored_staircase');
+        assert.equal(trial.rung, 9);
+        assert.equal(outcome.wildcardUnlockTriggered, true);
+        assert.equal(completed.wildcard.unlocked, true);
+
+        const aborted = sessionAtR9();
+        aborted.nextTrial();
+        const abortedOutcome = aborted.recordResult('aborted');
+
+        assert.equal(abortedOutcome.wildcardUnlockTriggered, false);
+        assert.equal(aborted.wildcard.unlocked, false);
+    });
+
+    check('a wildcard is 5–8 scored trials away and leaves the staircase/accuracy untouched', () =>
+    {
+        const session = sessionAtR9();
+        const r9 = session.nextTrial();
+        session.recordResult('correct');
+
+        let probe = session.nextTrial();
+
+        while (probe.trialType !== 'wildcard_probe')
+        {
+            recordPresented(session, probe, 'correct');
+            probe = session.nextTrial();
+        }
+
+        const scoredGap = probe.scoredTrialIndex - (r9.scoredTrialIndex + 1);
+        const staircaseBefore = JSON.stringify(session.state);
+        const accuracyBefore = session.accuracy;
+        const gardenBefore = JSON.parse(JSON.stringify(session.garden));
+        const outcome = session.recordResult('wildcard', 'woman');
+
+        assert.ok(scoredGap >= MIN_SCORED_GAP && scoredGap <= MAX_SCORED_GAP);
+        assert.equal(probe.cell.region, 'conflict');
+        assert.equal(probe.answer, null);
+        assert.equal(outcome.rewardGranted, true);
+        assert.equal(outcome.includedInAccuracy, false);
+        assert.equal(outcome.direction, null);
+        assert.equal(outcome.reversal, false);
+        assert.equal(JSON.stringify(session.state), staircaseBefore);
+        assert.equal(outcome.staircaseStateAfter, probe.staircaseState);
+        assert.equal(session.accuracy, accuracyBefore);
+        assert.deepEqual(session.garden.man, gardenBefore.man, 'the unselected plant grew');
+        const growthUnits = (side) => (
+            side.completed * (STAGES_PER_PLANT - 1) * CORRECT_PER_STAGE
+            + side.active.stage * CORRECT_PER_STAGE
+            + side.active.progress
+        );
+        assert.equal(growthUnits(session.garden.woman), growthUnits(gardenBefore.woman) + 1,
+            'the selected plant did not receive the wildcard growth reward');
+    });
+
+    const runUnlockedBlock = (wildcard, side = 'man') =>
+    {
+        const session = new TrainingSession({
+            wildcard,
+            rng: () => 0,
+            config: { ...DEFAULT_CONFIG, warmupTrials: 60 }
+        });
+        const probes = [];
+
+        while (!session.roundOver)
+        {
+            const trial = session.nextTrial();
+
+            if (trial.trialType === 'wildcard_probe')
+            {
+                probes.push(trial);
+            }
+
+            recordPresented(session, trial, 'correct', side);
+        }
+
+        return { session, probes };
+    };
+
+    check('an unlocked block has 60 scored trials plus exactly four spaced probes', () =>
+    {
+        const unlocked = { ...initWildcardProgress(), unlocked: true };
+        const { session, probes } = runUnlockedBlock(unlocked);
+
+        assert.equal(session.scoredTrialsPresented, 60);
+        assert.equal(session.trialsPresented, 60 + WILDCARD_PROBES_PER_BLOCK);
+        assert.equal(probes.length, WILDCARD_PROBES_PER_BLOCK);
+        assert.equal(probes.every((probe) => probe.cell.region === 'conflict'), true);
+
+        const positions = probes.map((probe) => probe.scoredTrialIndex);
+
+        assert.ok(positions[0] >= MIN_SCORED_GAP && positions[0] <= MAX_SCORED_GAP);
+        for (let i = 1; i < positions.length; i += 1)
+        {
+            const gap = positions[i] - positions[i - 1];
+            assert.ok(gap >= MIN_SCORED_GAP && gap <= MAX_SCORED_GAP);
+        }
+    });
+
+    check('two full unlocked blocks rotate through all eight conflict cells/tokens', () =>
+    {
+        const first = runUnlockedBlock({ ...initWildcardProgress(), unlocked: true });
+        const second = runUnlockedBlock(first.session.wildcard, 'woman');
+        const probes = [...first.probes, ...second.probes];
+
+        assert.equal(new Set(probes.map((probe) => probe.cell.id)).size, 8);
+        assert.equal(new Set(probes.map((probe) => probe.stimulus.token)).size, 8);
+    });
+
+    check('a late unlock never appends probes after the scored block is complete', () =>
+    {
+        const session = sessionAtR9({ trialsPerRound: 6 });
+        let probes = 0;
+
+        while (!session.roundOver)
+        {
+            const trial = session.nextTrial();
+            if (trial.trialType === 'wildcard_probe') probes += 1;
+            recordPresented(session, trial, 'correct');
+        }
+
+        assert.equal(session.scoredTrialsPresented, 6);
+        assert.equal(session.trialsPresented, 6);
+        assert.equal(probes, 0);
+        assert.equal(session.wildcard.unlocked, true);
+    });
+
     process.stdout.write('\ncross-session carry-over (PROGRESS 2.6e)\n');
 
-    /** A valid v3 record (D19). `over` patches whatever the check is about. */
+    /** A valid v4 record (D22). `over` patches whatever the check is about. */
     const carryOf = (over = {}) => ({
         group: 'NH',
         lastSittingId: 'sitting-1',
         staircase: initStaircase(DEFAULT_CONFIG),
         garden: initGarden(),
         placements: emptyPlacements(),
+        wildcard: initWildcardProgress(),
         blocksCompleted: 0,
         ...over
     });
 
     check('progress round-trips per participant', () =>
     {
-        const carry = carryOf({ blocksCompleted: 3, lastSittingId: 'sitting-2' });
+        const carry = carryOf({
+            blocksCompleted: 3,
+            lastSittingId: 'sitting-2',
+            wildcard: { unlocked: true, cellCursor: 4, tokenCursor: 8 }
+        });
 
         writeCarryOver('P01', carry);
 
@@ -532,6 +719,7 @@ try
         assert.equal(read.lastSittingId, 'sitting-2');
         assert.equal(read.group, 'NH');
         assert.deepEqual(read.staircase, carry.staircase);
+        assert.deepEqual(read.wildcard, carry.wildcard);
         assert.equal(readCarryOver('P02'), null, 'participants must not share a record');
     });
 
@@ -581,7 +769,7 @@ try
     {
         window.localStorage.setItem(
             'voice-plant:participant:P11',
-            JSON.stringify({ ...carryOf(), version: 3, staircase: undefined })
+            JSON.stringify({ ...carryOf(), version: 4, staircase: undefined })
         );
 
         assert.equal(readCarryOver('P11'), null);
@@ -677,13 +865,15 @@ try
 
         while (!session.roundOver)
         {
-            session.nextTrial();
-            session.recordResult('correct');
+            const trial = session.nextTrial();
+            recordPresented(session, trial, 'correct');
             trials += 1;
-            assert.ok(trials <= 60, 'round never ended');
+            assert.ok(trials <= 60 + WILDCARD_PROBES_PER_BLOCK, 'round never ended');
         }
 
-        assert.equal(trials, 60, `a perfect performer got ${trials} trials, not 60`);
+        assert.equal(session.scoredTrialsPresented, 60, 'the scored dose changed');
+        assert.equal(trials, 60 + WILDCARD_PROBES_PER_BLOCK,
+            `a perfect performer got ${trials} presentations`);
     });
 
     check('dose does not depend on performance', () =>
@@ -691,25 +881,27 @@ try
         const doseFor = (pattern) =>
         {
             const session = new TrainingSession({ rng: () => 0.5, trialsPerRound: 60 });
-            let trials = 0;
+            let presentations = 0;
 
             while (!session.roundOver)
             {
-                session.nextTrial();
-                session.recordResult(pattern(trials));
-                trials += 1;
+                const trial = session.nextTrial();
+                recordPresented(session, trial, pattern(session.scoredTrialsPresented));
+                presentations += 1;
             }
 
-            return trials;
+            return { presentations, scored: session.scoredTrialsPresented };
         };
 
         const perfect = doseFor(() => 'correct');
         const poor = doseFor((i) => (i % 4 === 0 ? 'correct' : 'incorrect'));
         const mixed = doseFor((i) => (i % 3 === 0 ? 'aborted' : 'correct'));
 
-        assert.equal(perfect, 60);
-        assert.equal(poor, 60, `a struggling participant got ${poor} trials`);
-        assert.equal(mixed, 60, 'aborted trials must count toward the round');
+        assert.equal(perfect.scored, 60);
+        assert.equal(poor.scored, 60, 'a struggling participant lost scored dose');
+        assert.equal(mixed.scored, 60, 'aborted trials must count toward scored dose');
+        assert.ok(perfect.presentations <= 64 && poor.presentations <= 64 && mixed.presentations <= 64,
+            'wildcards exceeded the four-probe cap');
     });
 
     check('growth rate matches what the constants predict', () =>
@@ -830,7 +1022,10 @@ try
         const header = lines[0].split(',');
         for (const column of ['stimulusVersion', 'stimulusId', 'response', 'correct', 'rtMs',
             'difficultyLevel', 'difficultyLevelAfter', 'staircaseState', 'staircaseEvent',
-            'staircaseReversal', 'landingX', 'fallDurationMs', 'vtlN', 'region',
+            'staircaseStateAfter', 'staircaseReversal', 'landingX', 'fallDurationMs',
+            'trialType', 'presentationIdx', 'scoredTrialIdx', 'probePairId',
+            'rewardGranted', 'includedInAccuracy', 'wildcardUnlockedBefore',
+            'wildcardUnlockedAfter', 'wildcardUnlockTriggered', 'vtlN', 'region',
             // The arm, as a column: D15-2 forbids pooling CI and NH, and an
             // analysis that infers the arm from an id prefix will get it wrong.
             'group'])
@@ -897,7 +1092,7 @@ try
         assert.equal(outcome.reversal, false);
     });
 
-    check('training rows never carry a null correct — conflict cells are excluded', () =>
+    check('scored training rows never carry a null correct — conflict cells are excluded', () =>
     {
         const { log } = simulateBlock(0.6);
 
@@ -906,6 +1101,68 @@ try
             assert.notEqual(record.correct, null, `${record.stimulusId} has no ground truth`);
             assert.notEqual(record.region, 'conflict', 'a conflict cell reached training');
         }
+    });
+
+    check('a wildcard row separates reward from correctness and records both counters', () =>
+    {
+        const session = sessionAtR9();
+        const log = new TrialLog({
+            participantId: 'P-wildcard',
+            group: 'CI',
+            sessionId: 'sitting-1',
+            block: 'block-1'
+        });
+
+        recordPresented(session, session.nextTrial(), 'correct');
+        let trial = session.nextTrial();
+
+        while (trial.trialType !== 'wildcard_probe')
+        {
+            recordPresented(session, trial, 'correct');
+            trial = session.nextTrial();
+        }
+
+        const outcome = session.recordResult('wildcard', 'woman');
+
+        log.add({
+            mode: 'train',
+            trialIdx: trial.index,
+            trialType: trial.trialType,
+            presentationIdx: trial.presentationIndex,
+            scoredTrialIdx: trial.scoredTrialIndex,
+            stimulus: trial.stimulus,
+            cell: trial.cell,
+            response: 'woman',
+            scoreCorrectness: false,
+            rtMs: 1200,
+            audioOnsetMs: 500,
+            difficultyLevel: null,
+            difficultyLevelAfter: null,
+            staircaseState: trial.staircaseState,
+            staircaseStateAfter: outcome.staircaseStateAfter,
+            staircaseEvent: null,
+            staircaseReversal: false,
+            probePairId: trial.probePairId,
+            rewardGranted: outcome.rewardGranted,
+            includedInAccuracy: outcome.includedInAccuracy,
+            wildcardUnlockedBefore: outcome.wildcardUnlockedBefore,
+            wildcardUnlockedAfter: outcome.wildcardUnlockedAfter,
+            wildcardUnlockTriggered: outcome.wildcardUnlockTriggered
+        });
+
+        const record = log.all()[0];
+
+        assert.equal(record.trialType, 'wildcard_probe');
+        assert.equal(record.region, 'conflict');
+        assert.equal(record.correct, null);
+        assert.equal(record.rewardGranted, true);
+        assert.equal(record.includedInAccuracy, false);
+        assert.equal(record.difficultyLevel, null);
+        assert.equal(record.staircaseEvent, null);
+        assert.equal(record.staircaseState, record.staircaseStateAfter);
+        assert.equal(record.presentationIdx, trial.presentationIndex);
+        assert.equal(record.scoredTrialIdx, trial.scoredTrialIndex);
+        assert.ok(record.probePairId);
     });
 
     check('vtlN uses the stimulus\'s realized ΔVTL, not the nominal one (D6)', () =>
@@ -1092,11 +1349,13 @@ try
                 config: withinSittingConfig(carry.staircase),
                 staircase: resumeStaircase(carry.staircase),
                 garden: carry.garden,
+                wildcard: carry.wildcard,
                 rng: () => 0.5
             })
             : new TrainingSession({
                 config: nextSittingConfig(carry.staircase),
                 garden: carry.garden,
+                wildcard: carry.wildcard,
                 rng: () => 0.5
             });
     };
@@ -1222,18 +1481,24 @@ try
         const perfect = new TrainingSession({ rng: () => 0.5 });
         const struggling = new TrainingSession({ rng: () => 0.5 });
 
-        for (let i = 0; i < TRIALS_PER_ROUND; i += 1)
+        while (!perfect.roundOver)
         {
-            perfect.nextTrial();
-            perfect.recordResult('correct');
-            struggling.nextTrial();
-            struggling.recordResult('incorrect');
+            const trial = perfect.nextTrial();
+            recordPresented(perfect, trial, 'correct');
+        }
+
+        while (!struggling.roundOver)
+        {
+            const trial = struggling.nextTrial();
+            recordPresented(struggling, trial, 'incorrect');
         }
 
         assert.equal(perfect.roundOver, true);
         assert.equal(struggling.roundOver, true);
-        assert.equal(perfect.trialsPresented, struggling.trialsPresented,
-            'blocks of different accuracy ran to different lengths');
+        assert.equal(perfect.scoredTrialsPresented, struggling.scoredTrialsPresented,
+            'blocks of different accuracy got different scored doses');
+        assert.equal(perfect.trialsPresented >= struggling.trialsPresented, true,
+            'the R9-gated run cannot contain fewer presentations than the locked run');
         assert.equal(perfect.accuracy === struggling.accuracy, false,
             'the two runs were meant to differ in accuracy');
 
@@ -1281,8 +1546,9 @@ try
 
             for (let i = 0; i < 30; i += 1)
             {
-                ids.push(session.nextTrial().stimulus.id);
-                session.recordResult('correct');
+                const trial = session.nextTrial();
+                ids.push(trial.stimulus.id);
+                recordPresented(session, trial, 'correct');
             }
 
             return ids;
@@ -1422,7 +1688,7 @@ try
             'voice-plant:participant:P22',
             JSON.stringify({
                 ...carryOf(),
-                version: 3,
+                version: 4,
                 placements: { man: [{ x: 'left' }], woman: null }
             })
         );

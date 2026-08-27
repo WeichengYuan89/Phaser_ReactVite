@@ -18,6 +18,7 @@ import { ParticipantGroup } from './protocol';
 export type Mode = 'train' | 'test';
 export type Response = 'man' | 'woman' | 'aborted' | 'timeout';
 export type StaircaseEvent = 'up' | 'down' | 'cap_stall';
+export type TrialType = 'scored_staircase' | 'wildcard_probe' | 'assessment';
 
 export interface TrialRecord
 {
@@ -34,7 +35,12 @@ export interface TrialRecord
     sessionId: string;
     block: string;
     mode: Mode;
+    trialType: TrialType;
+    /** Legacy row index; equal to presentationIdx. */
     trialIdx: number;
+    presentationIdx: number;
+    /** Null outside training; probes store scored trials completed before them. */
+    scoredTrialIdx: number | null;
 
     /** Declared composite inventory; never inferred from a filename (D19). */
     stimulusVersion: string;
@@ -54,10 +60,17 @@ export interface TrialRecord
     difficultyLevelAfter: number | null;
     /** Train only: an opaque snapshot of the staircase, for reconstruction. */
     staircaseState: string | null;
+    staircaseStateAfter: string | null;
     /** Actual movement, or the explicit D19 blocked-upward event at R9. */
     staircaseEvent: StaircaseEvent | null;
     /** Train only; cap_stall is always false here. */
     staircaseReversal: boolean | null;
+    probePairId: string | null;
+    rewardGranted: boolean | null;
+    includedInAccuracy: boolean;
+    wildcardUnlockedBefore: boolean | null;
+    wildcardUnlockedAfter: boolean | null;
+    wildcardUnlockTriggered: boolean | null;
 
     response: Response;
     /** null wherever the grid defines no correct answer — never false. */
@@ -74,6 +87,9 @@ export interface TrialInput
 {
     mode: Mode;
     trialIdx: number;
+    trialType?: TrialType;
+    presentationIdx?: number;
+    scoredTrialIdx?: number | null;
     stimulus: Stimulus;
     cell: Cell;
     response: Response;
@@ -84,8 +100,15 @@ export interface TrialInput
     difficultyLevel?: number | null;
     difficultyLevelAfter?: number | null;
     staircaseState?: string | null;
+    staircaseStateAfter?: string | null;
     staircaseEvent?: StaircaseEvent | null;
     staircaseReversal?: boolean | null;
+    probePairId?: string | null;
+    rewardGranted?: boolean | null;
+    includedInAccuracy?: boolean;
+    wildcardUnlockedBefore?: boolean | null;
+    wildcardUnlockedAfter?: boolean | null;
+    wildcardUnlockTriggered?: boolean | null;
     landingX?: number | null;
     fallDurationMs?: number | null;
 }
@@ -155,6 +178,14 @@ export class TrialLog
     add (input: TrialInput): TrialRecord
     {
         const { stimulus, cell } = input;
+        const trialType = input.trialType ?? (input.mode === 'train' ? 'scored_staircase' : 'assessment');
+        const correct = correctnessOf(cell, input.response, input.scoreCorrectness ?? false);
+
+        if (trialType === 'wildcard_probe' && correct !== null)
+        {
+            throw new Error('A wildcard probe cannot carry a correctness value.');
+        }
+
         const record: TrialRecord = {
             tsIso: new Date().toISOString(),
             participantId: this.meta.participantId,
@@ -162,7 +193,11 @@ export class TrialLog
             sessionId: this.meta.sessionId,
             block: this.meta.block,
             mode: input.mode,
+            trialType,
             trialIdx: input.trialIdx,
+            presentationIdx: input.presentationIdx ?? input.trialIdx,
+            scoredTrialIdx: input.scoredTrialIdx
+                ?? (input.mode === 'train' ? input.trialIdx : null),
 
             stimulusVersion: stimulus.stimulusVersion,
             stimulusId: stimulus.id,
@@ -178,11 +213,18 @@ export class TrialLog
             difficultyLevel: input.difficultyLevel ?? null,
             difficultyLevelAfter: input.difficultyLevelAfter ?? null,
             staircaseState: input.staircaseState ?? null,
+            staircaseStateAfter: input.staircaseStateAfter ?? null,
             staircaseEvent: input.staircaseEvent ?? null,
             staircaseReversal: input.staircaseReversal ?? null,
+            probePairId: input.probePairId ?? null,
+            rewardGranted: input.rewardGranted ?? (input.mode === 'train' ? correct === true : null),
+            includedInAccuracy: input.includedInAccuracy ?? (input.mode === 'train' && correct !== null),
+            wildcardUnlockedBefore: input.wildcardUnlockedBefore ?? null,
+            wildcardUnlockedAfter: input.wildcardUnlockedAfter ?? null,
+            wildcardUnlockTriggered: input.wildcardUnlockTriggered ?? null,
 
             response: input.response,
-            correct: correctnessOf(cell, input.response, input.scoreCorrectness ?? false),
+            correct,
             rtMs: input.rtMs,
             audioOnsetMs: input.audioOnsetMs,
 
@@ -215,11 +257,14 @@ export class TrialLog
 }
 
 const COLUMNS: readonly (keyof TrialRecord)[] = [
-    'tsIso', 'participantId', 'group', 'sessionId', 'block', 'mode', 'trialIdx',
+    'tsIso', 'participantId', 'group', 'sessionId', 'block', 'mode', 'trialType',
+    'trialIdx', 'presentationIdx', 'scoredTrialIdx',
     'stimulusVersion', 'stimulusId', 'set', 'token', 'f0TargetHz',
     'dvtlNominalSt', 'dvtlRealizedSt', 'f0n', 'vtlN', 'region',
-    'difficultyLevel', 'difficultyLevelAfter', 'staircaseState',
-    'staircaseEvent', 'staircaseReversal',
+    'difficultyLevel', 'difficultyLevelAfter', 'staircaseState', 'staircaseStateAfter',
+    'staircaseEvent', 'staircaseReversal', 'probePairId', 'rewardGranted',
+    'includedInAccuracy', 'wildcardUnlockedBefore', 'wildcardUnlockedAfter',
+    'wildcardUnlockTriggered',
     'response', 'correct', 'rtMs', 'audioOnsetMs',
     'landingX', 'fallDurationMs'
 ];

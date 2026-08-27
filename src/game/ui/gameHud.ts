@@ -45,12 +45,19 @@ export function createGameHud (scene: Scene, width: number): GameHud
     return { trialText, hintText };
 }
 
-export function updateGameHud (hud: Pick<GameHud, 'trialText'>, trial: number, total: number)
+export function updateGameHud (
+    hud: Pick<GameHud, 'trialText'>,
+    trial: number,
+    total: number,
+    wildcard = false
+)
 {
-    hud.trialText.setText(`${Math.min(trial, total)} / ${total}`);
+    const progress = `${Math.min(trial, total)} / ${total}`;
+
+    hud.trialText.setText(wildcard ? `★ Mystery  ·  ${progress}` : progress);
 }
 
-export type LandingOutcome = 'correct' | 'incorrect' | 'no-answer';
+export type LandingOutcome = 'correct' | 'incorrect' | 'wildcard' | 'no-answer';
 
 /**
  * Feedback after a landing.
@@ -75,8 +82,10 @@ export function showLandingFeedback (
         ? 'Correct'
         : outcome === 'incorrect'
             ? `That was ${answerLabel}`
-            : 'Steer the drop to a plant';
-    const color = outcome === 'correct' ? '#16a34a' : '#e2e8f0';
+            : outcome === 'wildcard'
+                ? 'Mystery voice collected'
+                : 'Steer the drop to a plant';
+    const color = outcome === 'correct' || outcome === 'wildcard' ? '#16a34a' : '#e2e8f0';
 
     const feedback = scene.add.text(x, 600, message, {
         fontFamily: 'Arial Black',
