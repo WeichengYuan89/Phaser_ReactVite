@@ -11,6 +11,7 @@ export default defineConfig({
         stimuli(),
     ],
     server: {
-        port: 8080
+        port: 8080,
+        strictPort: true
     }
 })

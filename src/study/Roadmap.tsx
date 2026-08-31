@@ -1,132 +1,158 @@
 /**
- * The roadmap hub — PROGRESS 2.6c, DECISIONS D15-4 and D16-1.
+ * Participant-only protocol hub (D24).
  *
- * The screen between the setup form and each block: it shows the whole protocol
- * as a path of nodes, one per 60-trial block, grouped into sittings, and starts
- * the next one.
- *
- * **Why this exists at all.** Cross-block progress used to be carried only by
- * the garden, and a garden says "I have grown N plants" — never "where am I,
- * how much is left, what is next". Worse, the garden grows on *correct answers*,
- * so as the only progress display it makes progress synonymous with performance:
- * a participant having a hard time sees themselves standing still while in fact
- * completing the protocol exactly on schedule. That is the score-as-verdict
- * problem D11-6 removed the score to avoid, returning in another shape.
- *
- * **Three hard constraints, none of them cosmetic:**
- *
- *  1. *Progress only, never difficulty* (D15-4). Difficulty is the staircase's
- *     job (D10) and two competing difficulty controls would fight. Nothing here
- *     renders a rung — see also D16-5, which moved the rung off the end-of-block
- *     screen for the same reason.
- *  2. *A node lights on completion, not on accuracy* (D16-2). Its only input is
- *     `blocksCompleted`, and by D11-1 a block ends after a fixed 60 trials
- *     however it went.
- *  3. *Nothing here flows back into stimulus selection* (D9-5, the P1 lesson).
- *     This module imports no training code and exports no state into it.
- *
- * The path length is the participant's own protocol — 3 nodes for the CI case
- * study, 9 for an NH participant (D15-1) — so it always ends somewhere reachable
- * rather than showing a mostly-locked road to someone who is here once.
+ * Nodes represent completed dose only: never accuracy or difficulty. The
+ * sitting stored by researcher/server access gates which row may be started,
+ * so finishing Sitting 1 cannot silently flow into Sitting 2.
  */
 
-import { ParticipantGroup, BLOCKS_PER_SITTING, protocolComplete, roadmap, totalBlocks } from './protocol';
+import {
+    ParticipantGroup,
+    BLOCKS_PER_SITTING,
+    SITTINGS,
+    blockWithinSitting,
+    protocolComplete,
+    roadmap,
+    sittingNumber,
+    totalBlocks
+} from './protocol';
 
 import './study.css';
 
 interface RoadmapProps
 {
-    participantId: string;
     group: ParticipantGroup;
-    /** Which appointment this is; blocks of one sitting resume the staircase. */
+    /** The visit authorized by researcher/server access. */
     sittingId: string;
     blocksCompleted: number;
     onStart: () => void;
-    onBack: () => void;
 }
 
-export function Roadmap ({
-    participantId,
-    group,
-    sittingId,
-    blocksCompleted,
-    onStart,
-    onBack
-}: RoadmapProps)
+export function Roadmap ({ group, sittingId, blocksCompleted, onStart }: RoadmapProps)
 {
     const nodes = roadmap(group, blocksCompleted);
     const total = totalBlocks(group);
     const complete = protocolComplete(group, blocksCompleted);
     const sittings = groupBySitting(nodes);
+    const permittedSitting = sittingNumber(sittingId) ?? 1;
+    const currentNode = nodes.find((node) => node.state === 'current');
+    const canStart = currentNode?.sitting === permittedSitting;
+    const sittingComplete = !complete && currentNode !== undefined && currentNode.sitting > permittedSitting;
+    const visitTooEarly = !complete && currentNode !== undefined && currentNode.sitting < permittedSitting;
+    const nextPosition = blockWithinSitting(blocksCompleted);
+
+    const title = complete
+        ? 'Thank you — study complete'
+        : sittingComplete
+            ? `Sitting ${permittedSitting} complete`
+            : `Sitting ${permittedSitting} of ${SITTINGS[group]}`;
 
     return (
-        <div className="study">
-            <div className="study-panel study-panel-wide">
-                <h1>Voice Plant</h1>
+        <div className="study participant-shell">
+            <main className="participant-panel participant-panel-wide">
+                <div className="participant-eyebrow">Voice Plant</div>
+                <div className="participant-heading-row">
+                    <div>
+                        <h1>{title}</h1>
+                        <p className="participant-lead">
+                            {complete
+                                ? 'You have completed all six training blocks.'
+                                : sittingComplete
+                                    ? 'All three blocks for this sitting have been completed.'
+                                    : visitTooEarly
+                                        ? 'This sitting is not ready to begin from the current study progress.'
+                                        : `Block ${nextPosition} of ${BLOCKS_PER_SITTING} is next.`}
+                        </p>
+                    </div>
+                    {!complete && (
+                        <span className="participant-chip">Block {Math.min(blocksCompleted + 1, total)} of {total}</span>
+                    )}
+                </div>
 
-                <p className="study-note">
-                    A voice falls with each raindrop. Steer it <strong>left to the Lupinus</strong> if
-                    the voice sounds like a man, <strong>right to the Cactus</strong> if it sounds like
-                    a woman. Correct answers make that plant grow. Nothing is scored and nothing is
-                    timed — you can let a drop go by.
-                </p>
-
-                <div className="roadmap">
+                <div className="roadmap" aria-label="Study progress">
                     {sittings.map((sitting) => (
-                        <div className="roadmap-sitting" key={sitting.number}>
-                            <span className="roadmap-sitting-label">Sitting {sitting.number}</span>
-                            <div className="roadmap-track">
-                                {sitting.nodes.map((node, position) => (
-                                    <div className="roadmap-step" key={node.index}>
-                                        {position > 0 && (
-                                            <span
-                                                className={`roadmap-link is-${node.state === 'locked' ? 'locked' : 'open'}`}
-                                            />
-                                        )}
-                                        <span className={`roadmap-node is-${node.state}`}>
-                                            {node.state === 'done' ? '✓' : node.index + 1}
-                                        </span>
-                                    </div>
-                                ))}
+                        <section
+                            className={`roadmap-sitting ${sitting.number === permittedSitting ? 'is-visit' : ''}`}
+                            key={sitting.number}
+                            aria-label={`Sitting ${sitting.number}`}
+                        >
+                            <div className="roadmap-sitting-heading">
+                                <span className="roadmap-sitting-label">Sitting {sitting.number}</span>
+                                <span className="roadmap-sitting-count">3 short blocks</span>
                             </div>
-                        </div>
+                            <div className="roadmap-track">
+                                {sitting.nodes.map((node, position) =>
+                                {
+                                    const unavailable = node.state === 'current' && node.sitting !== permittedSitting;
+                                    const state = unavailable ? 'locked' : node.state;
+
+                                    return (
+                                        <div className="roadmap-step" key={node.index}>
+                                            {position > 0 && (
+                                                <span className={`roadmap-link is-${state === 'locked' ? 'locked' : 'open'}`} />
+                                            )}
+                                            <span
+                                                className={`roadmap-node is-${state}`}
+                                                aria-label={`Block ${position + 1}: ${state}`}
+                                            >
+                                                {state === 'done' ? '✓' : position + 1}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </section>
                     ))}
                 </div>
 
-                <p className="study-note">
-                    {complete
-                        ? `All ${total} blocks done — this is the end of the training protocol.`
-                        : `Block ${blocksCompleted + 1} of ${total}. About 5–6 minutes.`}
-                </p>
-
-                {!complete && (
-                    <button className="study-primary" type="button" onClick={onStart} autoFocus>
-                        Start block {blocksCompleted + 1}
-                    </button>
+                {canStart && (
+                    <>
+                        {nextPosition > 1 && (
+                            <aside className="participant-callout participant-callout-rest">
+                                <strong>Take a short break before continuing.</strong>
+                                <span>Start when you feel ready. The next block takes about 5–6 minutes.</span>
+                            </aside>
+                        )}
+                        <div className="participant-reminder">
+                            <span><kbd>A</kbd> / ← &nbsp; Man voice → Lupinus</span>
+                            <span><kbd>D</kbd> / → &nbsp; Woman voice → Cactus</span>
+                        </div>
+                        <button className="participant-primary" type="button" onClick={onStart} autoFocus>
+                            Start block {nextPosition} of {BLOCKS_PER_SITTING}
+                        </button>
+                        <p className="participant-requirement">
+                            Do not close or refresh the page during the block. An interrupted block must be repeated.
+                        </p>
+                    </>
                 )}
 
-                <div className="study-progress-panel">
-                    <p className="study-note">
-                        <strong>{participantId}</strong> · {group} · {sittingId}
-                    </p>
+                {sittingComplete && (
+                    <aside className="participant-completion" role="status">
+                        <span className="participant-completion-mark">✓</span>
+                        <div>
+                            <strong>Your progress for this sitting has been recorded.</strong>
+                            <p>You may close this page now. Use the study link again at your next scheduled sitting.</p>
+                        </div>
+                    </aside>
+                )}
 
-                    {/*
-                      * Beyond the protocol, and labelled as such. Piloting needs a
-                      * way to run "one more" without pretending it is a protocol
-                      * block: extra blocks never appear on the path, because the
-                      * path is the protocol (D15-4).
-                      */}
-                    {complete && (
-                        <button className="study-quiet" type="button" onClick={onStart}>
-                            Run an extra block (beyond protocol)
-                        </button>
-                    )}
+                {visitTooEarly && (
+                    <aside className="participant-callout">
+                        <strong>Please contact the researcher.</strong>
+                        <span>The private link and current study progress do not refer to the same sitting.</span>
+                    </aside>
+                )}
 
-                    <button className="study-quiet" type="button" onClick={onBack}>
-                        Change participant
-                    </button>
-                </div>
-            </div>
+                {complete && (
+                    <aside className="participant-completion" role="status">
+                        <span className="participant-completion-mark">✓</span>
+                        <div>
+                            <strong>All study blocks are complete.</strong>
+                            <p>Your responses have been recorded. You may close this page.</p>
+                        </div>
+                    </aside>
+                )}
+            </main>
         </div>
     );
 }

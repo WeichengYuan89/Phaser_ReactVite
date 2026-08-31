@@ -1,24 +1,39 @@
-import { GameRoute } from './study/GameRoute';
+import { GameRoute, ResearcherSetupRoute } from './study/GameRoute';
 import { TestRoute } from './study/TestRoute';
 
 /**
- * Two activities, two front-ends (INTEGRATION_DESIGN §3):
+ * D24 keeps participant and researcher surfaces separate:
  *
  *   /       the Phaser training game
- *   /test   the pre/post psychometric test — plain React, no Phaser
+ *   /researcher local experimenter setup (never participant-facing)
+ *   /test       retained psychometric artefact — not in the D24 pilot
  *
- * A hand-rolled switch rather than react-router: there are exactly two screens,
- * they never nest, and no navigation happens during a session. Vite's SPA
- * fallback serves index.html for /test in both `dev` and `preview`.
+ * A hand-rolled switch is enough because these routes never nest. Researcher
+ * setup and the retained assessment route are development-only; the pilot
+ * production UI exposes only the participant route.
  */
-function currentRoute (): 'game' | 'test'
+function currentRoute (): 'game' | 'researcher' | 'test'
 {
-    return window.location.pathname.replace(/\/+$/, '').endsWith('/test') ? 'test' : 'game';
+    const path = window.location.pathname.replace(/\/+$/, '');
+
+    if (path.endsWith('/researcher'))
+    {
+        return 'researcher';
+    }
+
+    return path.endsWith('/test') ? 'test' : 'game';
 }
 
 function App ()
 {
-    return currentRoute() === 'test' ? <TestRoute /> : <GameRoute />;
+    const route = currentRoute();
+
+    if (route === 'researcher' && import.meta.env.DEV)
+    {
+        return <ResearcherSetupRoute />;
+    }
+
+    return route === 'test' && import.meta.env.DEV ? <TestRoute /> : <GameRoute />;
 }
 
 export default App;

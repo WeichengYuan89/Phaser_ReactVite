@@ -329,9 +329,10 @@ export function TestRoute ()
 
             {/*
               * Deliberately no feedback, no score, and no on-screen stimulus id.
-              * The study is run through `npm run dev` (vite/stimuliPlugin.mjs), so
-              * anything gated on a dev flag would still be visible to a real
-              * participant — inspect the trial log instead.
+              * This route runs identically under the local stimulus mount and
+              * the D23 production package, so anything gated on a dev flag
+              * could still leak into a real session — inspect the trial log
+              * instead.
               */}
             <div className="study-hint">{awaiting ? 'Man or woman?' : '\u00a0'}</div>
 

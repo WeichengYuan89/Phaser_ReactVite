@@ -11,13 +11,10 @@
  *   - whether R9 has unlocked D22 probes and where their cell/token rotation is;
  *   - how many blocks are done, which is the roadmap's only input (D15-4).
  *
- * **The storage medium is provisional.** INTEGRATION_DESIGN §10 lists
- * "cross-session persistence — localStorage vs. file export" as undecided.
- * localStorage is the default because the study is run locally on one laptop
- * with the experimenter present (D9-2), so the browser profile *is* the study
- * machine; it is also trivially replaceable, since everything crosses this one
- * module. It is **not** a data-retention mechanism: trial logs are exported to
- * file at the end of every block and must not be left to depend on this.
+ * **D24 supersedes this storage medium for the remote pilot.** `localStorage`
+ * remains only as a local development adapter while token access, trial upload
+ * and the server canonical checkpoint are implemented. It is not the remote
+ * data-retention mechanism and must never be treated as authoritative online.
  */
 
 import { GardenState } from '../game/training/garden';

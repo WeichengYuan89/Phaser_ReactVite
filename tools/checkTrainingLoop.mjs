@@ -99,7 +99,7 @@ try
     const { CELLS, STIMULI, STIMULUS_VERSION } = await load('game/data/stimulusCatalog.js');
     const { readCarryOver, writeCarryOver, clearCarryOver } = await load('study/sessionStore.js');
     const {
-        roadmap, totalBlocks, sittingOfBlock, blockWithinSitting, sittingId,
+        roadmap, totalBlocks, sittingOfBlock, blockWithinSitting, sittingId, sittingNumber,
         BLOCKS_PER_SITTING, SITTINGS
     } = await load('study/protocol.js');
     const {
@@ -1450,10 +1450,10 @@ try
         assert.equal(totalBlocks('NH'), SITTINGS.NH * BLOCKS_PER_SITTING);
         assert.equal(roadmap('CI', 0).length, totalBlocks('CI'));
         assert.equal(roadmap('NH', 0).length, totalBlocks('NH'));
-        // The point of node = block (D15-4 rationale (f)): a CI participant who
-        // attends once still lights most of their path.
+        // D24: one CI sitting completes half of the two-sitting path.
         assert.equal(roadmap('CI', BLOCKS_PER_SITTING).filter((n) => n.state === 'done').length,
-            totalBlocks('CI'), 'one CI sitting should complete the CI path');
+            BLOCKS_PER_SITTING, 'one CI sitting should complete three of six blocks');
+        assert.equal(SITTINGS.CI, 2, 'D24 requires two CI sittings');
     });
 
     check('exactly one node is current, and it is the next block', () =>
@@ -1520,6 +1520,8 @@ try
         }
 
         assert.equal(sittingId(2), 'sitting-2');
+        assert.equal(sittingNumber('sitting-2'), 2);
+        assert.equal(sittingNumber('session-2'), null);
     });
 
     check('roadmap state never reaches stimulus selection (P1 regression)', () =>

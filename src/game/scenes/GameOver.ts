@@ -1,16 +1,15 @@
 import { Scene } from 'phaser';
 
 import { EventBus } from '../EventBus';
-import { MAX_RUNG } from '../data/difficulty';
-import { ParticipantGroup, blockWithinSitting, totalBlocks } from '../../study/protocol';
+import {
+    ParticipantGroup,
+    BLOCKS_PER_SITTING,
+    blockWithinSitting,
+    totalBlocks
+} from '../../study/protocol';
 
 interface GameOverData
 {
-    trials?: number;
-    accuracy?: number | null;
-    rungReached?: number;
-    plantsGrown?: number;
-    stalls?: number;
     group?: ParticipantGroup;
     blocksCompleted?: number;
 }
@@ -22,14 +21,8 @@ interface GameOverData
  * fixed trial count, so "finishing" is not an achievement and not finishing is
  * not a failure.
  *
- * **The rung is not shown to the participant (D16-5).** It used to headline this
- * screen as "reached level 5 of 8", and that breaks in both directions once the
- * roadmap exists: a second "N of M" appears next to the progress path, and this
- * one measures difficulty — the one thing D15-4 forbids the progress display
- * from expressing. A participant reads it as a score they should raise, which
- * they cannot (the staircase sets it), and a participant who ends low reads it
- * as a verdict, which is the failure signal removing the score was meant to
- * delete. It now sits in the grey experimenter line with accuracy and stalls.
+ * D24 makes this participant-only. Accuracy, rung, stalls and export details
+ * belong in researcher data, never on this completion screen.
  */
 export class GameOver extends Scene
 {
@@ -41,67 +34,55 @@ export class GameOver extends Scene
     create (data: GameOverData)
     {
         const { width, height } = this.scale;
-        const trials = data.trials ?? 0;
-        const accuracy = data.accuracy ?? null;
-        const rungReached = data.rungReached ?? 1;
-        const plantsGrown = data.plantsGrown ?? 0;
-        const stalls = data.stalls ?? 0;
-        const group = data.group ?? 'NH';
+        const group = data.group ?? 'CI';
         const blocksCompleted = data.blocksCompleted ?? 1;
+        const position = blockWithinSitting(blocksCompleted - 1);
+        const complete = blocksCompleted >= totalBlocks(group);
+        const sittingComplete = !complete && position === BLOCKS_PER_SITTING;
+        const title = complete ? 'Study complete' : sittingComplete ? 'Sitting complete' : 'Block complete';
+        const message = complete
+            ? 'You have completed all six training blocks.'
+            : sittingComplete
+                ? 'You have completed all three blocks in this sitting.'
+                : `You have completed block ${position} of ${BLOCKS_PER_SITTING}.`;
 
         this.add.rectangle(width / 2, height / 2, width, height, 0x0f172a);
 
-        this.add.text(width / 2, 140, 'Block complete', {
+        this.add.text(width / 2, 150, title, {
             fontFamily: 'Arial Black',
             fontSize: 48,
             color: '#f8fafc'
         }).setOrigin(0.5);
 
-        this.add.text(width / 2, 240, `${plantsGrown} plant${plantsGrown === 1 ? '' : 's'} fully grown`, {
+        this.add.text(width / 2, 250, '✓', {
             fontFamily: 'Arial Black',
-            fontSize: 40,
+            fontSize: 68,
             color: '#86efac'
         }).setOrigin(0.5);
 
-        // Dose, not performance — the same quantity the roadmap advances on.
-        const position = blockWithinSitting(blocksCompleted - 1);
-        const remaining = Math.max(0, totalBlocks(group) - blocksCompleted);
-
-        this.add.text(width / 2, 320,
-            `${trials} raindrops  ·  block ${position} of this sitting`
-            + (remaining > 0 ? `  ·  ${remaining} left in the study` : '  ·  study complete'), {
-                fontFamily: 'Arial',
-                fontSize: 28,
-                color: '#cbd5e1'
-            }).setOrigin(0.5);
-
-        // Experimenter-facing, not participant-facing: accuracy, the staircase
-        // rung and any audio stalls belong on screen for the person running the
-        // session, and nowhere near the participant's summary.
-        const detail = accuracy === null
-            ? `No scored trials  ·  ladder R${rungReached}/R${MAX_RUNG}`
-            : `Accuracy ${(accuracy * 100).toFixed(0)}%  ·  ladder R${rungReached}/R${MAX_RUNG}`
-                + '  ·  data exported to your downloads folder';
-
-        this.add.text(width / 2, 390, detail, {
+        this.add.text(width / 2, 350, message, {
             fontFamily: 'Arial',
-            fontSize: 22,
-            color: '#94a3b8'
+            fontSize: 28,
+            color: '#cbd5e1',
+            align: 'center',
+            wordWrap: { width: 760 }
         }).setOrigin(0.5);
 
-        if (stalls > 0)
-        {
-            this.add.text(width / 2, 428, `${stalls} trial(s) started before audio was ready — check the log`, {
+        this.add.text(width / 2, 410,
+            complete
+                ? 'Thank you for taking part.'
+                : sittingComplete
+                    ? 'The overview will show what to do next.'
+                    : 'Take a short break before the next block.', {
                 fontFamily: 'Arial',
-                fontSize: 20,
-                color: '#fbbf24'
+                fontSize: 22,
+                color: '#94a3b8'
             }).setOrigin(0.5);
-        }
 
         // One exit, to the roadmap (D16-1). "Another block" used to restart the
         // scene directly, which is how a block could silently begin without the
         // participant ever seeing where they were in the protocol.
-        const continueButton = this.add.text(width / 2, 540, 'CONTINUE', {
+        const continueButton = this.add.text(width / 2, 540, 'VIEW NEXT STEP', {
             fontFamily: 'Arial Black',
             fontSize: 34,
             color: '#0f172a',

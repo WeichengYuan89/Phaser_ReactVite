@@ -177,9 +177,21 @@ When you issue the `npm run build` command, all static assets are automatically 
 
 ## Deploying to Production
 
-After you run the `npm run build` command, your code will be built into a single bundle and saved to the `dist` folder, along with any other assets your project imported, or stored in the public assets folder.
+`npm run build` creates the site bundle and then copies exactly the 640 WAVs
+referenced by `src/game/data/stimulusCatalog.ts` into `dist/stimuli/`. It also
+writes `dist/stimuli/asset-manifest.json` with a SHA-256 digest for every shipped
+file. This is the D23 remote-pilot build: it preserves the validated WAVs and
+does not transcode them.
 
-In order to deploy your game, you will need to upload *all* of the contents of the `dist` folder to a public facing web server.
+The packager rejects missing files, unexpected path roots, duplicate catalog
+paths, any non-WAV stimulus, and any `r1_r9_v2` reference. It also removes the
+unused legacy demo `dist/assets/Audio/*.opus` directory from the deployment
+output. The full `dist` directory must be deployed; a plain Vite bundle without
+the post-build stimulus step has no study audio.
+
+Remote pilot progress remains browser-local (`localStorage`) and trial CSV/JSON
+files are downloaded by the participant/researcher. Use the same browser and
+device for a participant and confirm every expected download before continuing.
 
 ## Customizing the Template
 

@@ -308,3 +308,463 @@
     color: rgba(255, 255, 255, 0.87);
     box-shadow: 0 0 0 4px rgba(216, 220, 227, 0.14);
 }
+
+/*
+ * D24 remote-pilot participant shell.
+ *
+ * The assessment route keeps the restrained instrument styling above. These
+ * rules are scoped so the training welcome/roadmap can feel like the same calm
+ * garden world as Phaser without turning the measurement route into a game.
+ */
+
+.participant-shell {
+    position: relative;
+    box-sizing: border-box;
+    min-height: 100vh;
+    height: auto;
+    padding: 36px 18px;
+    overflow-y: auto;
+    background:
+        radial-gradient(circle at 16% 10%, rgba(125, 211, 252, 0.18), transparent 32%),
+        radial-gradient(circle at 88% 88%, rgba(74, 222, 128, 0.14), transparent 34%),
+        linear-gradient(145deg, #071520 0%, #0d1d24 52%, #10231f 100%);
+    color: #f4f8f6;
+}
+
+.participant-shell::before,
+.participant-shell::after {
+    content: '';
+    position: fixed;
+    pointer-events: none;
+    border-radius: 999px;
+    filter: blur(2px);
+}
+
+.participant-shell::before {
+    width: 240px;
+    height: 240px;
+    left: -100px;
+    bottom: -120px;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.participant-shell::after {
+    width: 180px;
+    height: 180px;
+    right: -80px;
+    top: -90px;
+    background: rgba(56, 189, 248, 0.1);
+}
+
+.participant-panel {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    width: min(720px, 94vw);
+    padding: 38px;
+    border: 1px solid rgba(187, 247, 208, 0.16);
+    border-radius: 24px;
+    background: rgba(9, 24, 29, 0.9);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(16px);
+}
+
+.participant-panel-wide {
+    width: min(780px, 94vw);
+}
+
+.participant-panel-compact {
+    width: min(580px, 94vw);
+}
+
+.participant-panel h1,
+.participant-panel h2,
+.participant-panel p {
+    margin: 0;
+}
+
+.participant-panel h1 {
+    max-width: 620px;
+    font-size: clamp(2rem, 4vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+}
+
+.participant-panel h2 {
+    font-size: 1.08rem;
+    line-height: 1.3;
+    color: #eef8f2;
+}
+
+.participant-eyebrow {
+    font-size: 0.73rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #86efac;
+}
+
+.participant-heading-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 28px;
+}
+
+.participant-lead {
+    max-width: 620px;
+    margin-top: 12px !important;
+    color: #aec4c1;
+    font-size: 1.02rem;
+    line-height: 1.65;
+}
+
+.participant-chip {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    border: 1px solid rgba(134, 239, 172, 0.24);
+    border-radius: 999px;
+    background: rgba(34, 197, 94, 0.08);
+    color: #bbf7d0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.participant-section {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 16px;
+    padding-top: 22px;
+    border-top: 1px solid rgba(226, 232, 240, 0.1);
+}
+
+.participant-step {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #d9f99d;
+    color: #142119;
+    font-weight: 800;
+}
+
+.participant-section-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.participant-section-content > p {
+    color: #a9bdbb;
+    font-size: 0.94rem;
+    line-height: 1.55;
+}
+
+.participant-primary,
+.participant-secondary {
+    border: 0;
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 750;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.participant-primary {
+    width: 100%;
+    padding: 15px 22px;
+    background: #a7f3d0;
+    color: #09211a;
+    font-size: 1rem;
+}
+
+.participant-secondary {
+    align-self: flex-start;
+    padding: 11px 16px;
+    border: 1px solid rgba(167, 243, 208, 0.32);
+    background: rgba(16, 185, 129, 0.08);
+    color: #d1fae5;
+}
+
+.participant-primary:not(:disabled):hover,
+.participant-secondary:not(:disabled):hover,
+.mapping-card:hover {
+    transform: translateY(-1px);
+}
+
+.participant-primary:disabled,
+.participant-secondary:disabled {
+    opacity: 0.42;
+    cursor: default;
+}
+
+.participant-primary:focus-visible,
+.participant-secondary:focus-visible,
+.mapping-card:focus-visible,
+.participant-text-link:focus-visible {
+    outline: 3px solid #7dd3fc;
+    outline-offset: 3px;
+}
+
+.participant-check,
+.participant-error {
+    font-size: 0.86rem !important;
+    font-weight: 700;
+}
+
+.participant-check {
+    color: #86efac !important;
+}
+
+.participant-error {
+    color: #fda4af !important;
+}
+
+.mapping-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.mapping-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 12px;
+    min-height: 116px;
+    padding: 16px;
+    text-align: left;
+    border: 1px solid rgba(226, 232, 240, 0.13);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.035);
+    color: #eff8f4;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.mapping-card.is-practised {
+    border-color: rgba(134, 239, 172, 0.5);
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.mapping-card.is-practised::after {
+    content: '✓ practised';
+    grid-column: 1 / -1;
+    color: #86efac;
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.mapping-card strong {
+    font-size: 1rem;
+}
+
+.mapping-card > span:not(.mapping-direction) {
+    color: #91a9a5;
+    font-size: 0.82rem;
+}
+
+.mapping-direction {
+    grid-column: 1 / -1;
+    color: #bae6fd;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 5px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f8fafc;
+    font: 700 0.75rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.participant-callout,
+.participant-completion {
+    display: flex;
+    gap: 12px;
+    padding: 15px 17px;
+    border-radius: 14px;
+}
+
+.participant-callout {
+    flex-direction: column;
+    border: 1px solid rgba(125, 211, 252, 0.2);
+    background: rgba(14, 165, 233, 0.07);
+}
+
+.participant-callout-rest {
+    border-color: rgba(253, 230, 138, 0.2);
+    background: rgba(234, 179, 8, 0.06);
+}
+
+.participant-callout strong,
+.participant-completion strong {
+    color: #f1f5f9;
+    font-size: 0.9rem;
+}
+
+.participant-callout span,
+.participant-completion p {
+    color: #9fb5b2;
+    font-size: 0.86rem;
+    line-height: 1.5;
+}
+
+.participant-completion {
+    align-items: flex-start;
+    border: 1px solid rgba(134, 239, 172, 0.24);
+    background: rgba(34, 197, 94, 0.08);
+}
+
+.participant-completion-mark {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #86efac;
+    color: #0b2118;
+    font-weight: 900;
+}
+
+.participant-completion p {
+    margin-top: 5px;
+}
+
+.participant-requirement {
+    color: #809995;
+    text-align: center;
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.participant-text-link {
+    align-self: flex-start;
+    color: #bae6fd;
+    font-size: 0.86rem;
+}
+
+.participant-reminder {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    color: #b5c7c4;
+    font-size: 0.82rem;
+}
+
+.participant-shell .roadmap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    padding: 0;
+}
+
+.participant-shell .roadmap-sitting {
+    gap: 16px;
+    padding: 18px;
+    border: 1px solid rgba(226, 232, 240, 0.1);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.participant-shell .roadmap-sitting.is-visit {
+    border-color: rgba(134, 239, 172, 0.25);
+    background: rgba(34, 197, 94, 0.055);
+}
+
+.roadmap-sitting-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.participant-shell .roadmap-sitting-label {
+    color: #d7e6e2;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.roadmap-sitting-count {
+    color: #78928e;
+    font-size: 0.73rem;
+}
+
+.participant-shell .roadmap-track {
+    justify-content: center;
+}
+
+.participant-shell .roadmap-link {
+    width: clamp(30px, 5vw, 58px);
+    background: rgba(134, 239, 172, 0.42);
+}
+
+.participant-shell .roadmap-link.is-locked {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.participant-shell .roadmap-node {
+    width: 48px;
+    height: 48px;
+    border-color: rgba(255, 255, 255, 0.14);
+    color: #708985;
+    font-weight: 800;
+}
+
+.participant-shell .roadmap-node.is-done {
+    border-color: #86efac;
+    background: #86efac;
+    color: #0c2018;
+}
+
+.participant-shell .roadmap-node.is-current {
+    border-color: #bae6fd;
+    color: #e0f2fe;
+    box-shadow: 0 0 0 5px rgba(125, 211, 252, 0.12);
+}
+
+@media (max-width: 680px) {
+    .participant-shell {
+        justify-content: flex-start;
+        padding: 18px 10px;
+    }
+
+    .participant-panel {
+        gap: 20px;
+        width: 100%;
+        padding: 26px 20px;
+        border-radius: 18px;
+    }
+
+    .participant-heading-row {
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .mapping-grid,
+    .participant-shell .roadmap {
+        grid-template-columns: 1fr;
+    }
+
+    .participant-reminder {
+        flex-direction: column;
+        gap: 10px;
+    }
+}

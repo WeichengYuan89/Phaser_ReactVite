@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 /**
- * Serve the thesis stimulus set at /stimuli without copying it anywhere.
+ * Serve the thesis stimulus set at /stimuli during local development/preview.
  *
  * The WAVs live in `<thesis>/stimuli/`, outside this git repository, and total
  * ~132 MB. They must not be copied into `public/` (Vite copies that verbatim
@@ -11,11 +11,10 @@ import path from 'node:path';
  * is no better — `vite build` follows it. So the dev and preview servers mount
  * the directory directly and no duplicate ever exists.
  *
- * Consequence, and consistent with INTEGRATION_DESIGN §4.2: the study is run
- * locally via `npm run dev` (or `vite preview`), with the experimenter present.
- * A static `dist/` deployed elsewhere will have no audio unless the stimuli are
- * shipped alongside it — deliberately, since remote delivery would require the
- * transcoding decision in §4.2 to be revisited first.
+ * D23 adds a separate production-only step (`tools/packageStimuli.mjs`) that
+ * copies exactly the 640 catalog-referenced WAVs into `dist/stimuli/`. Keeping
+ * that concern out of this plugin preserves fast local development and prevents
+ * `public/` from becoming a second, hand-maintained stimulus source.
  *
  * The `root` option is what a vocoded stimulus set would switch (§3.2).
  */

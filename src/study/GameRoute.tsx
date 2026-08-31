@@ -1,8 +1,8 @@
 /**
  * The training activity's React shell.
  *
- * Three screens, in order: identify the participant, show them the roadmap,
- * play a block — then back to the roadmap with one more node lit (D16-1).
+ * Participant-only flow: validate access, complete audio/control onboarding,
+ * show the roadmap, play a block, then return to the roadmap (D24).
  *
  * It exists for reasons Phaser cannot handle for itself:
  *
@@ -13,9 +13,10 @@
  *    registry, rather than being created inside `Game.create()`. It lives in a
  *    ref, so it survives the unmount between blocks with its decoded-buffer
  *    cache intact.
- * 2. **Participant identity.** Training and the pre/post test must produce the
- *    same participant and session ids, so both collect them through the same
- *    `SessionSetup` form.
+ * 2. **Participant identity.** The participant route never asks for an id,
+ *    group or sitting. Until the server token exchange is implemented, local
+ *    researcher setup writes the same identity record the future exchange will
+ *    replace.
  * 3. **The roadmap is not part of the game world.** It reads per-participant
  *    progress out of storage and has to be on screen before Phaser boots, so the
  *    participant sees the path before block 1, not only between blocks.
@@ -24,23 +25,43 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { PhaserGame } from '../PhaserGame';
+import { STIMULI } from '../game/data/stimulusCatalog';
 import { EventBus } from '../game/EventBus';
+import { ParticipantAccessGate, PilotWelcome } from './PilotWelcome';
 import { SessionSetup } from './SessionSetup';
 import { Roadmap } from './Roadmap';
 import { StimulusPlayer } from './StimulusPlayer';
-import { ParticipantIdentity, readCarryOver, writeIdentity } from './sessionStore';
-import { ParticipantGroup, BLOCKS_PER_SITTING, sittingIds } from './protocol';
+import { ParticipantIdentity, readCarryOver, readIdentity, writeIdentity } from './sessionStore';
+import {
+    ParticipantGroup,
+    BLOCKS_PER_SITTING,
+    sittingIds,
+    sittingNumber
+} from './protocol';
 import { TRIALS_PER_ROUND } from '../game/training/garden';
 
 /** Module scope so the memo inside `SessionSetup` is not fed a new function each render. */
 const trainingSessions = (group: ParticipantGroup) => sittingIds(group);
 
-type Stage = 'setup' | 'hub' | 'playing';
+type Stage = 'access' | 'welcome' | 'hub' | 'playing';
+
+const AUDIO_CHECK_STIMULUS = STIMULI.find((stimulus) => (
+    stimulus.set === 'train' && stimulus.cellId === 'f110_vp28'
+));
+
+function readPilotIdentity (): ParticipantIdentity | null
+{
+    const identity = readIdentity();
+
+    return identity?.group === 'CI' && sittingNumber(identity.sessionId) !== null
+        ? identity
+        : null;
+}
 
 export function GameRoute ()
 {
-    const [identity, setIdentity] = useState<ParticipantIdentity | null>(null);
-    const [stage, setStage] = useState<Stage>('setup');
+    const [identity] = useState<ParticipantIdentity | null>(() => readPilotIdentity());
+    const [stage, setStage] = useState<Stage>(identity ? 'welcome' : 'access');
     const [blocksCompleted, setBlocksCompleted] = useState(0);
     const playerRef = useRef<StimulusPlayer | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -51,6 +72,17 @@ export function GameRoute ()
             setBlocksCompleted(readCarryOver(participantId)?.blocksCompleted ?? 0);
         },
         []
+    );
+
+    useEffect(
+        () =>
+        {
+            if (identity)
+            {
+                refreshProgress(identity.participantId);
+            }
+        },
+        [identity, refreshProgress]
     );
 
     /**
@@ -79,17 +111,37 @@ export function GameRoute ()
         [stage, identity, refreshProgress]
     );
 
-    const identify = async (chosen: ParticipantIdentity) =>
+    const player = () =>
     {
-        // Reuse the player across blocks: unlocking is only possible inside a
-        // user gesture, and its LRU of decoded buffers is worth keeping.
-        const player = playerRef.current ?? new StimulusPlayer();
+        const current = playerRef.current ?? new StimulusPlayer();
 
-        playerRef.current = player;
+        playerRef.current = current;
+
+        return current;
+    };
+
+    const playSample = async () =>
+    {
+        if (!AUDIO_CHECK_STIMULUS)
+        {
+            throw new Error('Audio-check stimulus is missing from the catalog.');
+        }
+
+        const current = player();
+
+        await current.unlock();
+        const playback = await current.play(AUDIO_CHECK_STIMULUS);
+
+        await playback.ended;
+    };
+
+    const enterHub = async () =>
+    {
+        const current = player();
 
         try
         {
-            await player.unlock();
+            await current.unlock();
         }
         catch (cause)
         {
@@ -97,9 +149,11 @@ export function GameRoute ()
             return;
         }
 
-        writeIdentity(chosen);
-        refreshProgress(chosen.participantId);
-        setIdentity(chosen);
+        if (identity)
+        {
+            refreshProgress(identity.participantId);
+        }
+
         setStage('hub');
     };
 
@@ -115,17 +169,18 @@ export function GameRoute ()
         );
     }
 
-    if (stage === 'setup' || !identity)
+    if (stage === 'access' || !identity)
+    {
+        return <ParticipantAccessGate />;
+    }
+
+    if (stage === 'welcome')
     {
         return (
-            <SessionSetup
-                title="Voice Plant — training"
-                blurb={`Training runs in blocks of ${TRIALS_PER_ROUND} raindrops, about 5–6 minutes each,`
-                    + ` ${BLOCKS_PER_SITTING} blocks per sitting with a rest in between.`}
-                startLabel="Continue"
-                sessions={trainingSessions}
-                showProgress
-                onStart={identify}
+            <PilotWelcome
+                sitting={sittingNumber(identity.sessionId) ?? 1}
+                onPlaySample={playSample}
+                onContinue={enterHub}
             />
         );
     }
@@ -134,12 +189,10 @@ export function GameRoute ()
     {
         return (
             <Roadmap
-                participantId={identity.participantId}
                 group={identity.group}
                 sittingId={identity.sessionId}
                 blocksCompleted={blocksCompleted}
                 onStart={() => setStage('playing')}
-                onBack={() => setStage('setup')}
             />
         );
     }
@@ -155,5 +208,27 @@ export function GameRoute ()
                 }}
             />
         </div>
+    );
+}
+
+/** Local-only experimenter entry. A server token exchange will replace this. */
+export function ResearcherSetupRoute ()
+{
+    const start = (identity: ParticipantIdentity) =>
+    {
+        writeIdentity(identity);
+        window.location.assign('/');
+    };
+
+    return (
+        <SessionSetup
+            title="Researcher setup"
+            blurb={`Configure the local pilot identity before handing the participant the main view.`
+                + ` Each sitting contains ${BLOCKS_PER_SITTING} blocks of ${TRIALS_PER_ROUND} raindrops.`}
+            startLabel="Open participant view"
+            sessions={trainingSessions}
+            showProgress
+            onStart={start}
+        />
     );
 }

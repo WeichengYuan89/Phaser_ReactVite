@@ -1,16 +1,11 @@
 /**
- * Participant / session entry, shared by both activities.
+ * Researcher/development identity entry.
  *
- * One component rather than two forms, because the two activities must produce
- * the *same* participant and session identifiers — that is what lets the Phase 3
- * analysis join a training block to the pre and post tests for the same person.
- * Two forms would eventually disagree about, say, whether the id is trimmed.
+ * D24 removes this form from the participant training route. It remains behind
+ * the development-only `/researcher` route and in the retained local assessment
+ * artefact until a server token exchange supplies the same identity fields.
  *
- * The group is collected here in both routes even though only training branches
- * on it, so that the arm a record belongs to is written down rather than
- * inferred from a naming convention. D15-2 forbids pooling the CI and NH arms —
- * they answer different questions over different spans — and that is safer as a
- * field than as a habit about participant ids.
+ * Group remains explicit rather than inferred from participant-id conventions.
  */
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
@@ -55,7 +50,7 @@ export function SessionSetup ({
 {
     const remembered = readIdentity();
     const [participantId, setParticipantId] = useState(remembered?.participantId ?? '');
-    const [group, setGroup] = useState<ParticipantGroup>(remembered?.group ?? 'NH');
+    const [group, setGroup] = useState<ParticipantGroup>(remembered?.group ?? 'CI');
     const [sessionId, setSessionId] = useState('');
     /**
      * The id the reset button is armed for, not a bare boolean: arming for P01

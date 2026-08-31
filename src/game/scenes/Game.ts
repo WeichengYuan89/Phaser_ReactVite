@@ -10,7 +10,6 @@ import { TRIALS_PER_ROUND } from '../training/garden';
 import { TrainingSession, TrainingTrial, TrialOutcome } from '../training/trainingSession';
 import {
     DEFAULT_CONFIG,
-    convergedRung,
     nextSittingConfig,
     resumeStaircase,
     withinSittingConfig
@@ -583,9 +582,9 @@ export class Game extends Scene
             blocksCompleted
         });
 
-        // Exported without asking. The study runs locally and a block that is
-        // not written to disk is a participant's session lost to a forgotten
-        // click; the browser download is the only durable copy.
+        // Legacy local-development export. D24 removes this responsibility from
+        // the participant once server trial upload and researcher export land;
+        // the participant UI deliberately exposes no Downloads message now.
         const stem = this.log.fileStem();
 
         download(`${stem}.csv`, this.log.toCsv(), 'text/csv');
@@ -594,11 +593,6 @@ export class Game extends Scene
         this.time.delayedCall(350, () =>
         {
             this.scene.start('GameOver', {
-                trials: this.log.length,
-                accuracy: this.session.accuracy,
-                rungReached: convergedRung(this.session.state),
-                plantsGrown: this.session.garden.man.completed + this.session.garden.woman.completed,
-                stalls: this.stalls,
                 group: this.group,
                 blocksCompleted
             });

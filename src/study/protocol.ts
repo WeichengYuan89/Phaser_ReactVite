@@ -17,10 +17,8 @@
  * and re-runs the 6-trial warm-up (which doubles as arrival calibration, after
  * Andersson 2024 §7.2 p.25).
  *
- * Dose is stratified because CI appointments are expensive and NH ones are not
- * (D15-1); it is small because the dose literature reports no dose-response
- * relationship in this line at all (D15 rationale (a)), so a larger protocol
- * would buy nothing it could be defended with.
+ * D24 amends the CI pilot dose to two sittings. The NH hook remains unchanged,
+ * but its research role is still pending.
  */
 
 export type ParticipantGroup = 'CI' | 'NH';
@@ -31,14 +29,13 @@ export const GROUPS: readonly ParticipantGroup[] = ['CI', 'NH'];
 export const BLOCKS_PER_SITTING = 3;
 
 /**
- * Sittings per arm (D15-1). The CI participant attends once — a second visit is
- * opportunistic, not part of the protocol — and NH participants three times
- * within a week.
+ * Sittings per arm. D24 changes the remote CI case to two sittings; the retained
+ * NH implementation still exposes three.
  */
-export const SITTINGS: Record<ParticipantGroup, number> = { CI: 1, NH: 3 };
+export const SITTINGS: Record<ParticipantGroup, number> = { CI: 2, NH: 3 };
 
 export const GROUP_LABEL: Record<ParticipantGroup, string> = {
-    CI: 'CI user (1 sitting)',
+    CI: 'CI user (2 sittings)',
     NH: 'Normal hearing (3 sittings)'
 };
 
@@ -67,6 +64,15 @@ export function blockWithinSitting (blockIndex: number): number
 export function sittingId (sitting: number): string
 {
     return `sitting-${sitting}`;
+}
+
+/** Parse a stored sitting id without trusting arbitrary text from storage. */
+export function sittingNumber (id: string): number | null
+{
+    const match = /^sitting-(\d+)$/.exec(id);
+    const value = match ? Number(match[1]) : NaN;
+
+    return Number.isInteger(value) && value > 0 ? value : null;
 }
 
 /** Sitting ids a participant of this group will attend, for the setup form. */

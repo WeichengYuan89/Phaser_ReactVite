@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { sites } from '@openai/sites-vite-plugin';
 
 import { stimuli } from './stimuliPlugin.mjs';
 
@@ -19,31 +20,46 @@ const phasermsg = () => {
     }
 }
 
-export default defineConfig({
-    base: './',
-    plugins: [
-        react(),
-        phasermsg(),
-        stimuli()
-    ],
-    logLevel: 'warning',
-    build: {
-        rollupOptions: {
-            output: {
-                manualChunks: {
-                    phaser: ['phaser']
+export default defineConfig(async () => {
+    const { cloudflare } = await import('@cloudflare/vite-plugin');
+
+    return {
+        base: './',
+        plugins: [
+            react(),
+            phasermsg(),
+            stimuli(),
+            sites(),
+            cloudflare({
+                config: {
+                    main: './worker/index.ts',
+                    compatibility_date: '2026-08-28',
+                    assets: {
+                        not_found_handling: 'single-page-application'
+                    }
+                }
+            })
+        ],
+        logLevel: 'warning',
+        build: {
+            rollupOptions: {
+                output: {
+                    manualChunks (id) {
+                        if (id.includes('/node_modules/phaser/'))
+                            return 'phaser';
+                    }
+                }
+            },
+            minify: 'terser',
+            terserOptions: {
+                compress: {
+                    passes: 2
+                },
+                mangle: true,
+                format: {
+                    comments: false
                 }
             }
-        },
-        minify: 'terser',
-        terserOptions: {
-            compress: {
-                passes: 2
-            },
-            mangle: true,
-            format: {
-                comments: false
-            }
         }
-    }
+    };
 });

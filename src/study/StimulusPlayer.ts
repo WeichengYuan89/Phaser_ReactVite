@@ -14,7 +14,7 @@
 
 import { Stimulus } from '../game/data/stimulusCatalog';
 
-/** Where the vite plugin (vite/stimuliPlugin.mjs) mounts the stimulus set. */
+/** Local Vite mounts this path; production packages the same URLs in dist. */
 export const STIMULUS_BASE = '/stimuli/';
 
 /**
