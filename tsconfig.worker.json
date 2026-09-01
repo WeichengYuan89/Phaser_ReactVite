@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["worker/pilot.ts", "src/vite-env.d.ts"],
+  "references": []
+}

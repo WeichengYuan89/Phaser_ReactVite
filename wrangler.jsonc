@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "voice-plant-preview",
+  "account_id": "85d31119efb7249c35127b88552d335f",
+  "main": "worker/pilot.ts",
+  "compatibility_date": "2026-08-31",
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist-cloudflare",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/test", "/test/*", "/researcher", "/researcher/*", "/stimuli/*"]
+  },
+  "vars": { "STUDY_MODE": "synthetic-only" },
+  "observability": { "enabled": false },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "voice-plant-preview",
+    "database_id": "02c666d7-4a2f-40f9-aec8-d2c9ee314685",
+    "migrations_dir": "worker/migrations"
+  }]
+}

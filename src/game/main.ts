@@ -1,7 +1,7 @@
 import { Boot } from './scenes/Boot';
 import { GameOver } from './scenes/GameOver';
 import { Game as MainGame } from './scenes/Game';
-import { AUTO, Game } from 'phaser';
+import { AUTO, Game, Scale } from 'phaser';
 import { Preloader } from './scenes/Preloader';
 
 //  Find out more information about the Game Config at:
@@ -37,7 +37,9 @@ const config: Phaser.Types.Core.GameConfig = {
  */
 const StartGame = (parent: string, registry: Record<string, unknown> = {}) => {
 
-    const game = new Game({ ...config, parent });
+    const game = new Game({ ...config, parent,
+        ...(registry.remoteAttempt ? { scale: { mode: Scale.FIT, autoCenter: Scale.CENTER_BOTH } } : {})
+    });
 
     for (const [key, value] of Object.entries(registry))
     {

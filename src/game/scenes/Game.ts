@@ -19,6 +19,9 @@ import { PlaybackHandle, StimulusPlayer } from '../../study/StimulusPlayer';
 import { Response, TrialLog, download } from '../../study/trialLog';
 import { readCarryOver, writeCarryOver } from '../../study/sessionStore';
 import { ParticipantGroup, isGroup } from '../../study/protocol';
+import { remoteTrainingSession } from '../../shared/remoteProtocol';
+import type { RemoteAttempt } from '../../shared/remoteProtocol';
+import { commitRemoteAttempt, interruptRemoteAttempt, uploadRemoteTrial } from '../../study/remoteClient';
 
 /** Vertical travel of a drop, from spawn to the plant line. */
 const SPAWN_Y = 60;
@@ -98,6 +101,11 @@ export class Game extends Scene
     private spawnTimer: Phaser.Time.TimerEvent | null = null;
     private roundOver = false;
     private stalls = 0;
+    private remoteAttempt: RemoteAttempt | null = null;
+    private pendingSave: Promise<void> = Promise.resolve();
+    private serverCommitted = false;
+    private remoteFailed = false;
+    private stopVisibility: (() => void) | null = null;
 
     constructor ()
     {
@@ -111,6 +119,10 @@ export class Game extends Scene
         this.roundOver = false;
         this.activeCluster = null;
         this.stalls = 0;
+        this.remoteAttempt = this.registry.get('remoteAttempt') ?? null;
+        this.pendingSave = Promise.resolve();
+        this.serverCommitted = false;
+        this.remoteFailed = false;
 
         this.participantId = data.participantId
             ?? (this.registry.get('participantId') as string | undefined)
@@ -162,7 +174,9 @@ export class Game extends Scene
          */
         const sameSitting = carry !== null && carry.lastSittingId === this.sittingId;
 
-        this.session = new TrainingSession(
+        this.session = this.remoteAttempt
+            ? remoteTrainingSession(this.remoteAttempt.checkpoint, this.sittingId, this.remoteAttempt.seed)
+            : new TrainingSession(
             carry === null
                 ? { config: DEFAULT_CONFIG }
                 : (sameSitting
@@ -211,6 +225,16 @@ export class Game extends Scene
         this.hintText.setText('Steer each raindrop to the plant that matches the voice.');
 
         this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanUp());
+        if (this.remoteAttempt) {
+            const onHidden = () => { if (document.hidden && !this.serverCommitted) this.failRemote('The page was hidden. Reopen the overview to repeat this block.'); };
+            const onClose = () => { if (!this.serverCommitted && this.remoteAttempt) interruptRemoteAttempt(this.remoteAttempt); };
+            document.addEventListener('visibilitychange', onHidden);
+            window.addEventListener('pagehide', onClose);
+            this.stopVisibility = () => {
+                document.removeEventListener('visibilitychange', onHidden);
+                window.removeEventListener('pagehide', onClose);
+            };
+        }
 
         this.scheduleNextTrial(0);
 
@@ -285,6 +309,10 @@ export class Game extends Scene
                 if (!this.player.isReady(trial.stimulus))
                 {
                     this.stalls += 1;
+                    if (this.remoteAttempt) {
+                        this.failRemote('Audio could not be loaded. Reopen the overview to repeat this block.');
+                        return;
+                    }
                 }
 
                 this.spawnCluster(trial);
@@ -328,7 +356,7 @@ export class Game extends Scene
             fallSpeed,
             trail,
             playback: null,
-            phase: 'falling'
+            phase: this.remoteAttempt ? 'held' : 'falling'
         };
 
         this.activeCluster = cluster;
@@ -347,6 +375,7 @@ export class Game extends Scene
             if (this.activeCluster === cluster)
             {
                 cluster.playback = playback;
+                cluster.phase = 'falling';
             }
             else
             {
@@ -356,6 +385,7 @@ export class Game extends Scene
         {
             // A stimulus that will not play must not silently become a trial.
             this.hintText.setText('Audio failed to load — check the stimulus server.');
+            if (this.remoteAttempt) this.failRemote('Audio playback failed. Reopen the overview to repeat this block.');
         });
     }
 
@@ -484,11 +514,14 @@ export class Game extends Scene
         this.afterTrial(outcome.roundOver);
     }
 
-    private afterTrial (roundOver: boolean)
+    private async afterTrial (roundOver: boolean)
     {
+        try { await this.pendingSave; }
+        catch { this.failRemote('Saving could not be confirmed. Reopen the overview to repeat this block.'); return; }
+        if (this.remoteFailed || !this.scene.isActive()) return;
         if (roundOver)
         {
-            this.endRound();
+            await this.endRound();
         }
         else
         {
@@ -512,7 +545,7 @@ export class Game extends Scene
         outcome: TrialOutcome
     )
     {
-        this.log.add({
+        const record = this.log.add({
             mode: 'train',
             trialIdx: cluster.trial.index,
             trialType: cluster.trial.trialType,
@@ -545,9 +578,13 @@ export class Game extends Scene
             landingX,
             fallDurationMs: cluster.trial.fallDurationMs
         });
+        if (this.remoteAttempt) {
+            this.pendingSave = uploadRemoteTrial(this.remoteAttempt, record);
+            void this.pendingSave.catch(() => {});
+        }
     }
 
-    private endRound ()
+    private async endRound ()
     {
         if (this.roundOver)
         {
@@ -572,7 +609,16 @@ export class Game extends Scene
         // depends on whether the next block opens a new sitting, and that is not
         // known here (D15-3). `blocksCompleted` is also the roadmap's only
         // input — it advances on completion, never on performance (D16-2).
-        writeCarryOver(this.participantId, {
+        if (this.remoteAttempt) {
+            try {
+                await commitRemoteAttempt(this.remoteAttempt, this.garden.placements(), this.stalls);
+                this.serverCommitted = true;
+            } catch {
+                this.failRemote('Block saving could not be confirmed. Reopen the overview to check server progress.');
+                return;
+            }
+        } else {
+            writeCarryOver(this.participantId, {
             group: this.group,
             lastSittingId: this.sittingId,
             staircase: this.session.state,
@@ -589,23 +635,44 @@ export class Game extends Scene
 
         download(`${stem}.csv`, this.log.toCsv(), 'text/csv');
         download(`${stem}.json`, this.log.toJson(), 'application/json');
+        }
 
         this.time.delayedCall(350, () =>
         {
             this.scene.start('GameOver', {
                 group: this.group,
-                blocksCompleted
+                blocksCompleted,
+                serverSaved: this.serverCommitted
             });
         });
     }
 
     private cleanUp ()
     {
+        this.stopVisibility?.();
+        this.stopVisibility = null;
+        if (this.remoteAttempt && !this.serverCommitted) interruptRemoteAttempt(this.remoteAttempt);
         this.spawnTimer?.destroy();
         this.spawnTimer = null;
         this.activeCluster?.playback?.stop();
         this.activeCluster?.trail?.destroy();
         this.waterBucket?.destroy();
         this.garden?.destroy();
+    }
+
+    private failRemote(message: string): void
+    {
+        if (this.remoteFailed || this.serverCommitted) return;
+        this.remoteFailed = true;
+        this.roundOver = true;
+        this.spawnTimer?.destroy();
+        this.spawnTimer = null;
+        this.activeCluster?.playback?.stop();
+        if (this.remoteAttempt) interruptRemoteAttempt(this.remoteAttempt);
+        this.hintText.setText(message);
+        this.add.rectangle(512, 350, 940, 250, 0x0f172a, 0.96).setDepth(9999);
+        this.add.text(512, 300, message, { fontSize: 24, color: '#ffffff', align: 'center', wordWrap: { width: 800 } }).setOrigin(0.5).setDepth(10000);
+        this.add.text(512, 410, 'REOPEN SAVED OVERVIEW', { fontSize: 26, color: '#86efac', backgroundColor: '#172c22', padding: { x: 20, y: 14 } })
+            .setOrigin(0.5).setDepth(10000).setInteractive({ useHandCursor: true }).on('pointerdown', () => window.location.reload());
     }
 }

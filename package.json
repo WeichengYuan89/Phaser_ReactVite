@@ -27,7 +27,13 @@
         "build-nolog": "vite build --config vite/config.prod.mjs && node tools/packageStimuli.mjs",
         "check": "node tools/checkTrainingLoop.mjs",
         "catalog": "python3 tools/build_catalog.py",
-        "catalog:check": "python3 tools/build_catalog.py --check"
+        "catalog:check": "python3 tools/build_catalog.py --check",
+        "build:cloudflare": "vite build --config vite/config.cloudflare.mjs && node tools/packagePilotStimuli.mjs",
+        "dev:cloudflare": "wrangler dev",
+        "check:worker": "tsc --project tsconfig.worker.json --noEmit",
+        "db:local": "wrangler d1 migrations apply voice-plant-preview --local",
+        "deploy:cloudflare": "node tools/deployCloudflare.mjs",
+        "study:admin": "node tools/studyAdmin.mjs"
     },
     "dependencies": {
         "phaser": "^3.90.0",
@@ -35,7 +41,9 @@
         "react-dom": "^19.0.0"
     },
     "devDependencies": {
+        "@cloudflare/vite-plugin": "1.37.1",
         "@eslint/js": "^9.22.0",
+        "@openai/sites-vite-plugin": "0.1.0",
         "@types/react": "^19.0.10",
         "@types/react-dom": "^19.0.4",
         "@vitejs/plugin-react": "6.0.2",
@@ -43,11 +51,10 @@
         "eslint-plugin-react-hooks": "^5.2.0",
         "eslint-plugin-react-refresh": "^0.4.19",
         "globals": "^16.0.0",
-        "typescript": "5.9.3",
-        "typescript-eslint": "^8.26.1",
-        "vite": "8.0.13",
         "terser": "^5.28.1",
-        "@cloudflare/vite-plugin": "1.37.1",
-        "@openai/sites-vite-plugin": "0.1.0"
+        "typescript": "5.9.3",
+        "typescript-eslint": "8.68.0",
+        "vite": "8.0.13",
+        "wrangler": "4.127.1"
     }
 }

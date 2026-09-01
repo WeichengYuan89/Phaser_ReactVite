@@ -26,9 +26,10 @@ interface RoadmapProps
     sittingId: string;
     blocksCompleted: number;
     onStart: () => void;
+    starting?: boolean;
 }
 
-export function Roadmap ({ group, sittingId, blocksCompleted, onStart }: RoadmapProps)
+export function Roadmap ({ group, sittingId, blocksCompleted, onStart, starting = false }: RoadmapProps)
 {
     const nodes = roadmap(group, blocksCompleted);
     const total = totalBlocks(group);
@@ -117,8 +118,8 @@ export function Roadmap ({ group, sittingId, blocksCompleted, onStart }: Roadmap
                             <span><kbd>A</kbd> / ← &nbsp; Man voice → Lupinus</span>
                             <span><kbd>D</kbd> / → &nbsp; Woman voice → Cactus</span>
                         </div>
-                        <button className="participant-primary" type="button" onClick={onStart} autoFocus>
-                            Start block {nextPosition} of {BLOCKS_PER_SITTING}
+                        <button className="participant-primary" type="button" onClick={onStart} disabled={starting} autoFocus>
+                            {starting ? 'Opening block…' : `Start block ${nextPosition} of ${BLOCKS_PER_SITTING}`}
                         </button>
                         <p className="participant-requirement">
                             Do not close or refresh the page during the block. An interrupted block must be repeated.

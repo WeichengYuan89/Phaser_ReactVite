@@ -14,9 +14,8 @@
  *    ref, so it survives the unmount between blocks with its decoded-buffer
  *    cache intact.
  * 2. **Participant identity.** The participant route never asks for an id,
- *    group or sitting. Until the server token exchange is implemented, local
- *    researcher setup writes the same identity record the future exchange will
- *    replace.
+ *    group or sitting. Remote builds exchange an invitation for a server-owned
+ *    session; local research builds retain the experimenter setup route.
  * 3. **The roadmap is not part of the game world.** It reads per-participant
  *    progress out of storage and has to be on screen before Phaser boots, so the
  *    participant sees the path before block 1, not only between blocks.
@@ -31,7 +30,10 @@ import { ParticipantAccessGate, PilotWelcome } from './PilotWelcome';
 import { SessionSetup } from './SessionSetup';
 import { Roadmap } from './Roadmap';
 import { StimulusPlayer } from './StimulusPlayer';
-import { ParticipantIdentity, readCarryOver, readIdentity, writeIdentity } from './sessionStore';
+import { ParticipantIdentity, REMOTE_PILOT, readCarryOver, readIdentity, writeIdentity } from './sessionStore';
+import { bootstrapRemote, observeRemoteSave, startRemoteAttempt } from './remoteClient';
+import type { SaveStatus } from './remoteClient';
+import type { RemoteAttempt } from '../shared/remoteProtocol';
 import {
     ParticipantGroup,
     BLOCKS_PER_SITTING,
@@ -43,7 +45,7 @@ import { TRIALS_PER_ROUND } from '../game/training/garden';
 /** Module scope so the memo inside `SessionSetup` is not fed a new function each render. */
 const trainingSessions = (group: ParticipantGroup) => sittingIds(group);
 
-type Stage = 'access' | 'welcome' | 'hub' | 'playing';
+type Stage = 'connecting' | 'access' | 'welcome' | 'hub' | 'playing';
 
 const AUDIO_CHECK_STIMULUS = STIMULI.find((stimulus) => (
     stimulus.set === 'train' && stimulus.cellId === 'f110_vp28'
@@ -60,11 +62,40 @@ function readPilotIdentity (): ParticipantIdentity | null
 
 export function GameRoute ()
 {
-    const [identity] = useState<ParticipantIdentity | null>(() => readPilotIdentity());
-    const [stage, setStage] = useState<Stage>(identity ? 'welcome' : 'access');
+    const [identity, setIdentity] = useState<ParticipantIdentity | null>(() => readPilotIdentity());
+    const [stage, setStage] = useState<Stage>(REMOTE_PILOT ? 'connecting' : identity ? 'welcome' : 'access');
     const [blocksCompleted, setBlocksCompleted] = useState(0);
     const playerRef = useRef<StimulusPlayer | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+    const [starting, setStarting] = useState(false);
+    const attemptRef = useRef<RemoteAttempt | null>(null);
+
+    useEffect(() => {
+        if (!REMOTE_PILOT) return;
+        let current = true;
+        // Opening a fragment-only invite from an already-open access gate does
+        // not remount React. Reload so it gets a fresh, single token exchange.
+        const onInvite = () => {
+            if (new URLSearchParams(window.location.hash.slice(1)).has('invite')) window.location.reload();
+        };
+        window.addEventListener('hashchange', onInvite);
+        void bootstrapRemote().then((state) => {
+            if (!current) return;
+            setIdentity(state.identity);
+            setBlocksCompleted(state.checkpoint?.blocksCompleted ?? 0);
+            setStage('welcome');
+        }).catch((cause: unknown) => {
+            if (!current) return;
+            if (cause && typeof cause === 'object' && 'code' in cause && cause.code === 401) setStage('access');
+            else {
+                setStage('access');
+                setError('The preview server could not be reached. Check your connection and reopen this page.');
+            }
+        });
+        const stop = observeRemoteSave(setSaveStatus);
+        return () => { current = false; stop(); window.removeEventListener('hashchange', onInvite); };
+    }, []);
 
     const refreshProgress = useCallback(
         (participantId: string) =>
@@ -157,13 +188,27 @@ export function GameRoute ()
         setStage('hub');
     };
 
+    const startBlock = async () => {
+        if (starting) return;
+        setStarting(true);
+        try {
+            if (REMOTE_PILOT) attemptRef.current = await startRemoteAttempt();
+            setStage('playing');
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'Cannot start the block');
+        } finally { setStarting(false); }
+    };
+
+    if (stage === 'connecting') return <div className="study"><main className="participant-panel"><h1>Opening your preview…</h1></main></div>;
+
     if (error)
     {
         return (
             <div className="study">
                 <div className="study-panel">
-                    <h1>Cannot start audio</h1>
+                    <h1>Unable to continue</h1>
                     <p className="study-note study-error">{error}</p>
+                    <button onClick={() => window.location.reload()}>Reopen saved overview</button>
                 </div>
             </div>
         );
@@ -192,19 +237,25 @@ export function GameRoute ()
                 group={identity.group}
                 sittingId={identity.sessionId}
                 blocksCompleted={blocksCompleted}
-                onStart={() => setStage('playing')}
+                onStart={() => { void startBlock(); }}
+                starting={starting}
             />
         );
     }
 
     return (
-        <div id="app">
+        <div id="app" className={REMOTE_PILOT ? 'remote-game-shell' : undefined}>
+            {REMOTE_PILOT && <div className="remote-save-status" role="status" aria-live="polite">
+                {saveStatus === 'saved' ? 'Saved to server' : saveStatus === 'saving' ? 'Saving…'
+                    : saveStatus === 'retrying' ? 'Connection lost — paused while retrying…' : 'Block interrupted — reopen to repeat this block'}
+            </div>}
             <PhaserGame
                 registry={{
                     stimulusPlayer: playerRef.current,
                     participantId: identity.participantId,
                     sessionId: identity.sessionId,
-                    group: identity.group
+                    group: identity.group,
+                    remoteAttempt: attemptRef.current
                 }}
             />
         </div>

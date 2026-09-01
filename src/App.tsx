@@ -1,5 +1,6 @@
 import { GameRoute, ResearcherSetupRoute } from './study/GameRoute';
 import { TestRoute } from './study/TestRoute';
+import { REMOTE_PILOT } from './study/sessionStore';
 
 /**
  * D24 keeps participant and researcher surfaces separate:
@@ -33,7 +34,10 @@ function App ()
         return <ResearcherSetupRoute />;
     }
 
-    return route === 'test' && import.meta.env.DEV ? <TestRoute /> : <GameRoute />;
+    return <>
+        {REMOTE_PILOT && <div className="preview-banner">Technical preview · synthetic participants only · not approved for research data</div>}
+        {route === 'test' && import.meta.env.DEV ? <TestRoute /> : <GameRoute />}
+    </>;
 }
 
 export default App;

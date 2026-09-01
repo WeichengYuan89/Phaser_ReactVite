@@ -12,6 +12,7 @@ interface GameOverData
 {
     group?: ParticipantGroup;
     blocksCompleted?: number;
+    serverSaved?: boolean;
 }
 
 /**
@@ -39,7 +40,7 @@ export class GameOver extends Scene
         const position = blockWithinSitting(blocksCompleted - 1);
         const complete = blocksCompleted >= totalBlocks(group);
         const sittingComplete = !complete && position === BLOCKS_PER_SITTING;
-        const title = complete ? 'Study complete' : sittingComplete ? 'Sitting complete' : 'Block complete';
+        const title = complete ? 'Study complete' : sittingComplete ? 'Sitting complete' : data.serverSaved ? 'Block saved' : 'Block complete';
         const message = complete
             ? 'You have completed all six training blocks.'
             : sittingComplete

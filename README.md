@@ -261,3 +261,23 @@ Created by [Phaser Studio](mailto:support@phaser.io). Powered by coffee, anime, 
 The Phaser logo and characters are &copy; 2011 - 2025 Phaser Studio Inc.
 
 All rights reserved.
+
+## Cloudflare synthetic preview (2026-08-31)
+
+The direct Cloudflare target is separate from the retained Sites build. It is
+restricted to synthetic participants and must not collect real CI data yet.
+
+- `npm run build:cloudflare`: build the participant UI and verify exactly 520
+  unchanged training WAVs; no test/centre/control/demo/v2 audio is shipped.
+- `npm run check:worker`: type-check the Worker and shared protocol.
+- `npm run db:local` then `npm run dev:cloudflare`: run the local D1 preview.
+- `node tools/checkCloudflare.mjs`: run integration checks against the local
+  preview with synthetic records, including six blocks and interruption.
+- `npm run study:admin -- create`: create a local synthetic invite, stored in an
+  ignored `*.local` file. Researcher access uses ignored `.dev.vars`.
+- `npm run deploy:cloudflare`: requires an explicitly provisioned EU D1 database
+  and matching local provisioning evidence before uploading.
+
+See `../drafts/05-remote-ci-pilot/CLOUDFLARE_RUNBOOK.md` for account authorization,
+provisioning, secret handling, export, remote checks and remaining real-study
+gates. Never commit secrets, invitations, exports or `.wrangler` state.

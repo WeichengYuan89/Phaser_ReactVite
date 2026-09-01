@@ -25,6 +25,17 @@ import { ParticipantGroup, isGroup } from './protocol';
 
 const KEY_PREFIX = 'voice-plant:participant:';
 const IDENTITY_KEY = 'voice-plant:current';
+declare const __REMOTE_PILOT__: boolean;
+export const REMOTE_PILOT = typeof __REMOTE_PILOT__ !== 'undefined' && __REMOTE_PILOT__;
+let remoteIdentity: ParticipantIdentity | null = null;
+let remoteCheckpoint: CarryOver | null = null;
+
+/** In-memory projection of a server response, never restored from localStorage. */
+export function acceptRemoteState(identity: ParticipantIdentity, checkpoint: CarryOver | null): void
+{
+    remoteIdentity = identity;
+    remoteCheckpoint = checkpoint ? JSON.parse(JSON.stringify(checkpoint)) : null;
+}
 
 /**
  * Bump when the record's meaning changes, not merely its shape.
@@ -102,6 +113,7 @@ function storage (): Storage | null
 
 export function readIdentity (): ParticipantIdentity | null
 {
+    if (REMOTE_PILOT) return remoteIdentity;
     const stored = safeParse<Partial<ParticipantIdentity>>(storage()?.getItem(IDENTITY_KEY) ?? null);
 
     if (!stored?.participantId || !isGroup(stored.group))
@@ -118,6 +130,7 @@ export function readIdentity (): ParticipantIdentity | null
 
 export function writeIdentity (identity: ParticipantIdentity): void
 {
+    if (REMOTE_PILOT) throw new Error('Remote identity must come from the server');
     storage()?.setItem(IDENTITY_KEY, JSON.stringify(identity));
 }
 
@@ -130,6 +143,8 @@ export function writeIdentity (identity: ParticipantIdentity): void
  */
 export function readCarryOver (participantId: string): CarryOver | null
 {
+    if (REMOTE_PILOT) return participantId === remoteIdentity?.participantId && remoteCheckpoint
+        ? JSON.parse(JSON.stringify(remoteCheckpoint)) : null;
     const stored = safeParse<Partial<CarryOver>>(storage()?.getItem(KEY_PREFIX + participantId) ?? null);
 
     if (!stored
@@ -166,6 +181,7 @@ export function writeCarryOver (
     carry: Omit<CarryOver, 'version'>
 ): void
 {
+    if (REMOTE_PILOT) throw new Error('Remote checkpoints must be committed by the server');
     const record: CarryOver = {
         ...carry,
         version: RECORD_VERSION,
@@ -193,5 +209,6 @@ export function writeCarryOver (
  */
 export function clearCarryOver (participantId: string): void
 {
+    if (REMOTE_PILOT) throw new Error('Remote progress cannot be reset in the participant UI');
     storage()?.removeItem(KEY_PREFIX + participantId);
 }

@@ -768,3 +768,9 @@ kbd {
         gap: 10px;
     }
 }
+/* Cloudflare preview and server acknowledgment are deliberately separate. */
+.preview-banner { background: #3f2c0b; color: #ffedbd; text-align: center; padding: 10px 16px; font: 14px/1.5 system-ui, sans-serif; }
+.remote-save-status { background: #10271e; color: #d7ffe9; text-align: center; padding: 8px; font: 14px/1.5 system-ui, sans-serif; }
+#app.remote-game-shell { height: calc(100dvh - 42px); min-height: 400px; flex-direction: column; justify-content: flex-start; }
+.remote-game-shell .remote-save-status { box-sizing: border-box; width: 100%; flex: 0 0 auto; }
+.remote-game-shell #game-container { width: 100%; min-height: 0; flex: 1; }
